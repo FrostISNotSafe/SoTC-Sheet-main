@@ -1195,3 +1195,25 @@
     flex-direction: column;
   }
 }
+
+/* Skill Card Rich Text and Tags */
+.skill-body { margin-top: 6px; }
+.skill-cost-line { color: var(--text-secondary); font-weight: bold; margin-bottom: 8px; }
+.skill-text { text-align: left; color: var(--text-primary); line-height: 1.4; }
+.skill-line { margin-bottom: 6px; }
+.skill-modules-title { margin-top: 10px; font-weight: bold; color: var(--primary-color); }
+.skill-modules-list { color: var(--text-secondary); }
+
+.skill-tag { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 0.85rem; font-weight: bold; margin-right: 6px; background: var(--input-bg); color: var(--text-primary); }
+.skill-tag::before { content: '['; margin-right: 2px; opacity: 0.9; }
+.skill-tag::after { content: ']'; margin-left: 2px; opacity: 0.9; }
+.tag--slash { background: var(--warning-orange); color: var(--dark-bg); }
+.tag--pierce { background: var(--error-red); color: var(--dark-bg); }
+.tag--blunt { background: #795548; color: #ffffff; }
+.tag--block { background: #42a5f5; color: #0a0a0a; }
+.tag--evade { background: var(--success-green); color: var(--dark-bg); }
+.tag--hit { background: var(--primary-color); color: var(--dark-bg); }
+.tag--on-use { background: var(--input-bg); color: var(--text-primary); }
+.tag--range { background: var(--input-bg); color: var(--text-primary); }
+
+.dice-notation { font-family: monospace; background: var(--dark-bg); padding: 0 4px; border-radius: 3px; }

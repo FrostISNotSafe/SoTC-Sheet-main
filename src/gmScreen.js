@@ -1,12 +1,18 @@
 import { CharacterManager } from './character.js';
+import { CharacterSheet } from './characterSheet.js';
 import { ref, get } from 'firebase/database';
 import { database } from './firebase.js';
 import { ChatSystem } from './chatSystem.js';
+import { themeHues, themeBrandMap, brandProfiles, getBrandProfile } from './themes/index.js';
 
 export class GMScreen {
   constructor() {
     this.allCharacters = [];
-    this.currentTheme = 'gold';
+    const storedTheme = localStorage.getItem('sotc-theme-key');
+    const storedBrand = localStorage.getItem('sotc-brand-key');
+    this.currentTheme = storedTheme || 'gold';
+    this.brandKey = storedBrand || (themeBrandMap[this.currentTheme] || 'default');
+    this.changeTheme(this.currentTheme);
     this.chatSystem = new ChatSystem('gm-user', 'Game Master', 'gm');
     this.init();
   }
@@ -60,16 +66,7 @@ export class GMScreen {
           <div class="header-right">
             <div class="theme-selector">
               <label>Theme:</label>
-              <select id="theme-select">
-                <option value="gold">Gold</option>
-                <option value="blue">Blue</option>
-                <option value="green">Green</option>
-                <option value="red">Red</option>
-                <option value="purple">Purple</option>
-                <option value="cyan">Cyan</option>
-                <option value="orange">Orange</option>
-                <option value="pink">Pink</option>
-              </select>
+              <select id="theme-select"></select>
             </div>
             <button class="btn-logout" id="back-btn">BACK TO SYSTEM</button>
           </div>
@@ -118,9 +115,6 @@ export class GMScreen {
           </div>
         </div>
 
-        <div class="terminal-footer">
-          STARS OF THE CITY - GAME MASTER SCREEN
-        </div>
       </div>
     `;
 
@@ -222,21 +216,37 @@ export class GMScreen {
 
   setupThemeSelector() {
     const themeSelect = document.getElementById('theme-select');
-    if (themeSelect) {
-      themeSelect.addEventListener('change', (e) => {
-        this.changeTheme(e.target.value);
-      });
-    }
+    if (!themeSelect) return;
+    themeSelect.innerHTML = '';
+    Object.entries(themeBrandMap).forEach(([themeKey, brandKey]) => {
+      const opt = document.createElement('option');
+      opt.value = themeKey;
+      const themeLabel = themeKey.charAt(0).toUpperCase() + themeKey.slice(1);
+      const brandLabel = (brandProfiles[brandKey] && brandProfiles[brandKey].brand) || brandKey;
+      opt.textContent = `${themeLabel} - ${brandLabel}`;
+      themeSelect.appendChild(opt);
+    });
+    themeSelect.value = this.currentTheme;
+    themeSelect.addEventListener('change', (e) => {
+      const theme = e.target.value;
+      this.changeTheme(theme);
+      const brandKey = themeBrandMap[theme];
+      if (brandKey) {
+        this.brandKey = brandKey;
+        const brand = getBrandProfile(brandKey);
+        // Could be used to update any brand-specific UI in GM screen later
+      }
+      localStorage.setItem('sotc-theme-key', theme);
+      localStorage.setItem('sotc-brand-key', this.brandKey);
+    });
   }
 
   changeTheme(themeName) {
-    const themes = {
-      gold: 51, blue: 240, green: 120, red: 0,
-      purple: 280, cyan: 180, orange: 30, pink: 320
-    };
-    const hue = themes[themeName];
-    document.documentElement.style.setProperty('--base-hue', hue);
-    this.currentTheme = themeName;
+    const hue = themeHues[themeName];
+    if (typeof hue === 'number') {
+      document.documentElement.style.setProperty('--base-hue', hue);
+      this.currentTheme = themeName;
+    }
   }
 
   attachEventListeners() {
@@ -283,29 +293,8 @@ export class GMScreen {
     const character = this.allCharacters.find(char => char.id === characterId && char.userId === userId);
     if (!character) return;
 
-    const details = `
-      Character: ${character.name || 'Unnamed'}
-      Level: ${character.level || 1}
-      Archetype: ${character.archetype || 'Unknown'}
-      
-      Stats:
-      - Might: ${character.stats?.might || 1}
-      - Vitality: ${character.stats?.vitality || 1} 
-      - Agility: ${character.stats?.agility || 1}
-      - Intellect: ${character.stats?.intellect || 1}
-      - Instinct: ${character.stats?.instinct || 1}
-      - Persona: ${character.stats?.persona || 1}
-      
-      Derivative Stats:
-      - HP: ${character.derivativeStats?.hp || 40}
-      - Stagger Resist: ${character.derivativeStats?.staggerResist || 20}
-      - Speed Die: ${character.derivativeStats?.speedDieSize || 'd6'}
-      - Max Light: ${character.derivativeStats?.maxLight || 3}
-      
-      Skills: ${(character.skills || []).length} skills
-    `;
-    
-    alert(details);
+    // Open the player's Character Sheet view as GM, focusing the clicked character
+    new CharacterSheet(userId, characterId);
   }
 
   exportCharacterData() {

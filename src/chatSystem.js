@@ -261,6 +261,15 @@ export class ChatSystem {
           result = `ONLINE | User: ${this.userName}`;
           break;
 
+        case 'news':
+          if (this.userRole !== 'gm') {
+            result = 'ERROR: Permission denied. Only GM can manage news.';
+            break;
+          }
+          result = await this.handleNewsCommand(args);
+          messageType = 'system';
+          break;
+
         default:
           result = `ERROR: Unknown command '${command}'. Type /help for available commands.`;
           break;
@@ -286,6 +295,26 @@ export class ChatSystem {
     }
   }
 
+  async handleNewsCommand(args) {
+    if (args.length === 0) return 'Usage: /news add <text> | /news clear | /news list';
+    const sub = args[0].toLowerCase();
+    const newsRef = ref(database, 'newsTicker');
+    if (sub === 'add') {
+      const text = args.slice(1).join(' ').trim();
+      if (!text) return 'Usage: /news add <text>';
+      await push(newsRef, { text, createdAt: new Date().toISOString() });
+      return 'News added.';
+    }
+    if (sub === 'clear') {
+      await remove(newsRef);
+      return 'All news cleared.';
+    }
+    if (sub === 'list') {
+      return 'Listing not supported in chat output.';
+    }
+    return `Unknown subcommand '${sub}'.`;
+  }
+
   getHelpText() {
     const commonCommands = [
       '/help - Show this help',
@@ -298,6 +327,8 @@ export class ChatSystem {
 
     const gmCommands = this.userRole === 'gm' ? [
       '/clear - Clear chat (GM only)',
+      '/news add <text> - Add a login news item',
+      '/news clear - Clear all login news',
       '/whisper [user] [msg] - Private message (GM only)'
     ] : [];
 

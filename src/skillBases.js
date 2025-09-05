@@ -1,6 +1,6 @@
 /**
  * Stars of the City - Skill Bases System
- * Manages all available skill bases that can be used to create custom skills
+ * Manages all available skill bases that can be used to create custom skills and E.G.O
  */
 
 export class SkillBasesManager {
@@ -8,6 +8,7 @@ export class SkillBasesManager {
     this.skillBases = this.initializeSkillBases();
   }
 
+  // ===================================== BASE SKILLS =====================================
   // Initialize all skill bases from the SOTC system
   initializeSkillBases() {
     return [
@@ -356,8 +357,9 @@ export class SkillBasesManager {
             notation: '1d6'
           }
         ],
-        description: 'Balanced mix of offense and defense',
-        category: 'advanced_mixed'
+        description: 'Balanced mix of offense and defense - can be configured with different damage types',
+        category: 'advanced_mixed',
+        example: 'Burning Blade: [Slash] 1d6 [Hit] Inflict 3 Burn, [Block] 1d6+1, [Slash] 1d6 [Hit] Inflict 3 Burn'
       },
       {
         id: 'lunge',
@@ -601,6 +603,151 @@ export class SkillBasesManager {
         description: 'Defensive counter followed by combination attacks',
         category: 'advanced_counter',
         contributor: 'Community Contribution: Tsuchigumo'
+      },
+      // ===================================== UNIQUE SKILLS =====================================
+      {
+        id: 'sharpened_blade',
+        name: 'Sharpened Blade',
+        cost: 2,
+        dice: [
+          {
+            type: 'offensive',
+            tag: '[Slash]',
+            dieSize: 'd6',
+            bonus: 0,
+            notation: '1d6',
+            effects: []
+          },
+          {
+            type: 'offensive',
+            tag: '[Slash]',
+            dieSize: 'd6',
+            bonus: 0,
+            notation: '1d6',
+            effects: ['[Hit] Inflict 3 Burn']
+          }
+        ],
+        modules: [],
+        prebuiltEffects: ['[Limit: 5 Uses]'],
+        description: '[Slash] 1d6 [Slash] 1d6 [Hit] Inflict 3 Burn',
+        category: 'unique',
+        isUnique: true
+      },
+      {
+        id: 'ice_shard_unique',
+        name: 'Ice Shard',
+        cost: 1,
+        dice: [
+          {
+            type: 'offensive',
+            tag: '[Pierce]',
+            dieSize: 'd8',
+            bonus: 3,
+            notation: '1d8+3',
+            effects: ['[Hit] Inflict 2 Fragile']
+          }
+        ],
+        modules: [
+          { id: 'stronger', rank: 1, targetDie: 0 },
+          { id: 'stronger', rank: 1, targetDie: 0 },
+          { id: 'fragile', rank: 1, targetDie: 0 },
+          { id: 'penetration', rank: 2 }
+        ],
+        prebuiltEffects: [],
+        description: '[Pierce] 1d8+3 [Hit] Inflict 2 Fragile [Penetration]\n\nModules: T1: Stronger x2, Fragile | T2: Penetration',
+        category: 'unique',
+        isUnique: true
+      },
+      {
+        id: 'shadow_step_unique',
+        name: 'Shadow Step',
+        cost: 2,
+        dice: [
+          {
+            type: 'defensive',
+            tag: '[Evade]',
+            dieSize: 'd8',
+            bonus: 1,
+            notation: '1d8+1',
+            effects: []
+          },
+          {
+            type: 'offensive',
+            tag: '[Slash]',
+            dieSize: 'd8',
+            bonus: 1,
+            notation: '1d8+1',
+            effects: ['[Hit] Gain +1 Power next turn']
+          }
+        ],
+        modules: [
+          { id: 'stronger', rank: 1, targetDie: 0 },
+          { id: 'stronger', rank: 1, targetDie: 1 },
+          { id: 'range', rank: 1 },
+          { id: 'charge', rank: 2 }
+        ],
+        prebuiltEffects: ['[Range] This skill can target at range'],
+        description: '[Range] This skill can target at range\n\n[Evade] 1d8+1\n[Slash] 1d8+1 [Hit] Gain +1 Power next turn [Charge]\n\nModules: T1: Stronger x2, Range | T2: Charge',
+        category: 'unique',
+        isUnique: true
+      },
+      {
+        id: 'overwhelming_force_unique',
+        name: 'Overwhelming Force',
+        cost: 3,
+        dice: [
+          {
+            type: 'offensive',
+            tag: '[Blunt]',
+            dieSize: 'd10',
+            bonus: 5,
+            notation: '1d10+5',
+            effects: []
+          },
+          {
+            type: 'offensive',
+            tag: '[Blunt]',
+            dieSize: 'd8',
+            bonus: 0,
+            notation: '1d8',
+            effects: []
+          }
+        ],
+        modules: [
+          { id: 'power_up_2', rank: 2, targetDie: 0 },
+          { id: 'power_up_3', rank: 3, targetDie: 0 },
+          { id: 'overwhelm', rank: 2 },
+          { id: 'finisher', rank: 3 }
+        ],
+        prebuiltEffects: ['[Overwhelm] Ignore enemy defensive dice if power difference is 5+', '[Finisher] +5 Power if target is below 50% HP'],
+        description: '[Overwhelm] Ignore enemy defensive dice if power difference is 5+\n[Finisher] +5 Power if target is below 50% HP\n\n[Blunt] 1d10+5\n[Blunt] 1d8\n\nModules: T2: Power Up II | T3: Power Up III, Finisher',
+        category: 'unique',
+        isUnique: true
+      },
+      {
+        id: 'healing_light_unique',
+        name: 'Healing Light',
+        cost: 1,
+        dice: [
+          {
+            type: 'defensive',
+            tag: '[Block]',
+            dieSize: 'd6',
+            bonus: 0,
+            notation: '1d6',
+            effects: []
+          }
+        ],
+        modules: [
+          { id: 'stronger', rank: 1, targetDie: 0 },
+          { id: 'stronger', rank: 1, targetDie: 0 },
+          { id: 'clash_win', rank: 1 },
+          { id: 'curative', rank: 2 }
+        ],
+        prebuiltEffects: ['[On Use] Reduce 1 Ailment on self by 3', '[Clash Win] Recover 5 HP'],
+        description: '[On Use] Reduce 1 Ailment on self by 3\n[Clash Win] Recover 5 HP\n\n[Block] 1d6\n\nModules: T1: Stronger x2, Clash Win | T2: Curative',
+        category: 'unique',
+        isUnique: true
       }
     ];
   }
@@ -642,6 +789,22 @@ export class SkillBasesManager {
   // Get bases suitable for E.G.O (cost 2 or higher)
   getEgoBases() {
     return this.skillBases.filter(base => base.cost >= 2);
+  }
+
+  // Get unique skills (complete pre-built skills)
+  getUniqueSkills() {
+    return this.skillBases.filter(base => base.isUnique === true);
+  }
+
+  // Get regular bases (non-unique)
+  getRegularBases() {
+    return this.skillBases.filter(base => !base.isUnique);
+  }
+
+  // Check if a base is a unique skill
+  isUniqueSkill(baseId) {
+    const base = this.getBaseById(baseId);
+    return base ? base.isUnique === true : false;
   }
 
   // Get all categories

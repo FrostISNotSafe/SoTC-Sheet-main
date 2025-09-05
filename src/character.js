@@ -2,6 +2,7 @@ import { ref, set, get, update, push } from 'firebase/database';
 import { database } from './firebase.js';
 import { skillBasesManager } from './skillBases.js';
 import { skillModulesManager } from './skillModules.js';
+import { baseEgoPassiveManager } from './baseEgoPassives.js';
 
 export class CharacterManager {
   constructor(userId) {
@@ -56,14 +57,7 @@ export class CharacterManager {
 
   // Get Base E.G.O passive options
   getBaseEgoPassives() {
-    return [
-      { id: 'power_boost', name: 'Power Surge', description: 'When this E.G.O hits, gain +1 Power on all dice for the rest of the scene' },
-      { id: 'defensive', name: 'Aegis Protocol', description: 'When this E.G.O is used defensively, reduce incoming damage by 2' },
-      { id: 'healing', name: 'Life Essence', description: 'When this E.G.O hits, recover 5 HP' },
-      { id: 'stagger_recovery', name: 'Mental Fortitude', description: 'When this E.G.O hits, recover 3 Stagger Resist' },
-      { id: 'light_recovery', name: 'Illumination', description: 'Using this E.G.O recovers 1 Light' },
-      { id: 'emotion_efficiency', name: 'Emotional Control', description: 'This E.G.O costs 1 less Emotion Point (minimum 1)' }
-    ];
+    return baseEgoPassiveManager.getAllPassives();
   }
 
   // Create a new character with default values
@@ -392,7 +386,12 @@ export class CharacterManager {
       return { success: false, error: 'Invalid skill base' };
     }
 
-    // Validate modules
+    // Check if this is a unique skill (pre-built)
+    if (base.isUnique) {
+      return this.createUniqueSkill(base, name);
+    }
+
+    // Validate modules for regular skills
     const moduleValidation = skillModulesManager.validateSkillBuild(baseId, modules);
     if (!moduleValidation.valid) {
       return { success: false, error: moduleValidation.errors.join(', ') };
@@ -414,6 +413,31 @@ export class CharacterManager {
     };
 
     // Apply modules to the skill
+    this.applyModulesToSkill(skill);
+
+    return { success: true, skill };
+  }
+
+  // Create unique skill (pre-built with modules included)
+  createUniqueSkill(base, customName = null) {
+    // Create the skill object with pre-built configuration
+    const skill = {
+      id: this.generateSkillId(),
+      name: customName || base.name,
+      description: base.description,
+      baseId: base.id,
+      baseName: base.name,
+      cost: base.cost,
+      dice: [...base.dice], // Copy base dice with effects
+      modules: base.modules || [],
+      tags: [],
+      type: 'unique',
+      isUnique: true,
+      prebuiltEffects: base.prebuiltEffects || [],
+      createdAt: new Date().toISOString()
+    };
+
+    // Apply pre-built modules to the skill
     this.applyModulesToSkill(skill);
 
     return { success: true, skill };
@@ -479,13 +503,22 @@ export class CharacterManager {
 
   // Apply specific module effect to skill
   applyModuleEffect(skill, module, moduleRef) {
+    // Determine target die index from either targetDie (index) or targetDieId (string id)
+    let targetDieIndex = 0;
+    if (typeof moduleRef.targetDie === 'number') {
+      targetDieIndex = moduleRef.targetDie;
+    } else if (moduleRef.targetDieId) {
+      targetDieIndex = skill.dice.findIndex(d => d.id === moduleRef.targetDieId);
+      if (targetDieIndex === -1) targetDieIndex = 0;
+    }
+
     switch (module.id) {
       case 'power_up':
       case 'power_up_2':
       case 'power_up_3':
+      case 'stronger':
         // Apply power bonus to specified die (or first die if not specified)
-        const targetDieIndex = moduleRef.targetDie || 0;
-        if (skill.dice[targetDieIndex]) {
+        if (skill.dice[targetDieIndex] && module.target === 'die') {
           const powerBonus = parseInt(module.effect.match(/\+(\d+)/)[1]);
           skill.dice[targetDieIndex].bonus = (skill.dice[targetDieIndex].bonus || 0) + powerBonus;
           skill.dice[targetDieIndex].notation = this.updateDieNotation(skill.dice[targetDieIndex]);
@@ -496,10 +529,9 @@ export class CharacterManager {
       case 'pierce':
       case 'blunt':
         // Change damage type
-        const targetDie = moduleRef.targetDie || 0;
-        if (skill.dice[targetDie] && skill.dice[targetDie].type === 'offensive') {
-          skill.dice[targetDie].damageType = module.id;
-          skill.dice[targetDie].tag = skill.dice[targetDie].tag.replace('[Any Offensive]', `[${module.id.charAt(0).toUpperCase() + module.id.slice(1)}]`);
+        if (skill.dice[targetDieIndex] && skill.dice[targetDieIndex].type === 'offensive' && module.target === 'die') {
+          skill.dice[targetDieIndex].damageType = module.id;
+          skill.dice[targetDieIndex].tag = skill.dice[targetDieIndex].tag.replace('[Any Offensive]', `[${module.id.charAt(0).toUpperCase() + module.id.slice(1)}]`);
         }
         break;
 
@@ -544,7 +576,19 @@ export class CharacterManager {
       errors.push(`Maximum skills reached (${maxSkills})`);
     }
 
-    // Check if character has enough modules
+    // Check if it's a unique skill
+    const base = skillBasesManager.getBaseById(skillData.baseId);
+    if (base && base.isUnique) {
+      // Unique skills don't consume spare modules, only check skill slots
+      return {
+        valid: errors.length === 0,
+        errors: errors,
+        moduleCost: { cost: { rank1: 0, rank2: 0, rank3: 0 }, canAfford: { rank1: true, rank2: true, rank3: true } },
+        isUnique: true
+      };
+    }
+
+    // Check if character has enough modules for regular skills
     const moduleCost = skillModulesManager.calculateModuleCost(skillData.modules, character.spareModules);
 
     if (!moduleCost.canAfford.rank1) {
@@ -560,7 +604,8 @@ export class CharacterManager {
     return {
       valid: errors.length === 0,
       errors: errors,
-      moduleCost: moduleCost
+      moduleCost: moduleCost,
+      isUnique: false
     };
   }
 
@@ -582,11 +627,13 @@ export class CharacterManager {
     if (!character.skills) character.skills = [];
     character.skills.push(skillResult.skill);
 
-    // Deduct modules
-    const moduleCost = validation.moduleCost.cost;
-    character.spareModules.rank1 -= moduleCost.rank1;
-    character.spareModules.rank2 -= moduleCost.rank2;
-    character.spareModules.rank3 -= moduleCost.rank3;
+    // Deduct modules only for non-unique skills
+    if (!validation.isUnique) {
+      const moduleCost = validation.moduleCost.cost;
+      character.spareModules.rank1 -= moduleCost.rank1;
+      character.spareModules.rank2 -= moduleCost.rank2;
+      character.spareModules.rank3 -= moduleCost.rank3;
+    }
 
     return { success: true, skill: skillResult.skill, character };
   }
@@ -600,16 +647,18 @@ export class CharacterManager {
 
     const skill = character.skills[skillIndex];
 
-    // Return modules to character
-    skill.modules.forEach(moduleRef => {
-      if (moduleRef.rank === 1 || moduleRef.rank === 'rank1') {
-        character.spareModules.rank1++;
-      } else if (moduleRef.rank === 2 || moduleRef.rank === 'rank2') {
-        character.spareModules.rank2++;
-      } else if (moduleRef.rank === 3 || moduleRef.rank === 'rank3') {
-        character.spareModules.rank3++;
-      }
-    });
+    // Return modules to character only for non-unique skills
+    if (!skill.isUnique) {
+      skill.modules.forEach(moduleRef => {
+        if (moduleRef.rank === 1 || moduleRef.rank === 'rank1') {
+          character.spareModules.rank1++;
+        } else if (moduleRef.rank === 2 || moduleRef.rank === 'rank2') {
+          character.spareModules.rank2++;
+        } else if (moduleRef.rank === 3 || moduleRef.rank === 'rank3') {
+          character.spareModules.rank3++;
+        }
+      });
+    }
 
     // Remove skill
     character.skills.splice(skillIndex, 1);
@@ -859,18 +908,25 @@ export class CharacterManager {
       return { success: false, error: 'Base E.G.O already created' };
     }
 
+    // Validate Base E.G.O. data
+    const validation = this.validateBaseEgoData(egoData);
+    if (!validation.valid) {
+      return { success: false, error: validation.error };
+    }
+
     const baseEgo = {
       id: 'base_ego',
       name: egoData.name || 'Base E.G.O',
       rating: 'ZAYIN',
       emotionCost: 6,
-      skillBase: egoData.skillBase,
-      modules: {
-        rank1: 3,
-        rank2: 1,
-        rank3: 1
-      },
+      baseId: egoData.baseId,
+      baseName: egoData.baseName,
+      baseCost: egoData.baseCost,
+      dice: egoData.dice || [],
+      modules: egoData.modules || { rank1: [], rank2: [], rank3: [] },
       powerBenefit: egoData.powerBenefit, // 'dice_power' or 'cost_bonus'
+      passiveId: egoData.passiveId,
+      passiveChoice: egoData.passiveChoice,
       passive: egoData.passive,
       description: egoData.description || '',
       createdAt: new Date().toISOString()
@@ -878,6 +934,9 @@ export class CharacterManager {
 
     character.ego.base = baseEgo;
     character.progression.baseEgoCreated = true;
+
+    // Apply E.G.O. passive to character if applicable
+    this.applyBaseEgoPassive(character, baseEgo);
 
     return { success: true, character };
   }
@@ -1017,5 +1076,115 @@ export class CharacterManager {
   // Get skill modules manager
   getSkillModulesManager() {
     return skillModulesManager;
+  }
+
+  // Validate Base E.G.O. data
+  validateBaseEgoData(egoData) {
+    if (!egoData.name || egoData.name.trim() === '') {
+      return { valid: false, error: 'E.G.O. name is required' };
+    }
+
+    if (!egoData.baseId) {
+      return { valid: false, error: 'Base skill is required' };
+    }
+
+    const base = skillBasesManager.getBaseById(egoData.baseId);
+    if (!base || base.cost < 2) {
+      return { valid: false, error: 'Base must have cost 2 or higher' };
+    }
+
+    if (!egoData.modules) {
+      return { valid: false, error: 'Modules are required' };
+    }
+
+    // Validate module counts
+    const modules = egoData.modules;
+    if (!modules.rank1 || modules.rank1.length !== 3) {
+      return { valid: false, error: 'Must have exactly 3 Rank 1 modules' };
+    }
+    if (!modules.rank2 || modules.rank2.length !== 1) {
+      return { valid: false, error: 'Must have exactly 1 Rank 2 module' };
+    }
+    if (!modules.rank3 || modules.rank3.length !== 1) {
+      return { valid: false, error: 'Must have exactly 1 Rank 3 module' };
+    }
+
+    if (!egoData.powerBenefit || !['dice_power', 'cost_bonus'].includes(egoData.powerBenefit)) {
+      return { valid: false, error: 'Must select a valid power benefit' };
+    }
+
+    if (!egoData.passiveId) {
+      return { valid: false, error: 'Must select a passive' };
+    }
+
+    const passive = baseEgoPassiveManager.getPassiveById(egoData.passiveId);
+    if (!passive) {
+      return { valid: false, error: 'Invalid passive selected' };
+    }
+
+    if (passive.requiresChoice && !egoData.passiveChoice) {
+      return { valid: false, error: 'Passive requires a choice' };
+    }
+
+    return { valid: true };
+  }
+
+  // Apply Base E.G.O. passive effects to character
+  applyBaseEgoPassive(character, baseEgo) {
+    if (!character.egoPassiveEffects) {
+      character.egoPassiveEffects = [];
+    }
+
+    const passive = baseEgoPassiveManager.getPassiveById(baseEgo.passiveId);
+    if (!passive) return;
+
+    const passiveEffect = {
+      id: baseEgo.passiveId,
+      name: passive.name,
+      description: baseEgoPassiveManager.resolvePassiveDescription(
+        baseEgo.passiveId,
+        baseEgo.passiveChoice
+      ),
+      source: 'Base E.G.O.',
+      isActive: true
+    };
+
+    character.egoPassiveEffects.push(passiveEffect);
+
+    // Apply specific passive effects that modify character stats
+    this.applyPassiveStatModifications(character, baseEgo.passiveId, baseEgo.passiveChoice);
+  }
+
+  // Apply passive stat modifications
+  applyPassiveStatModifications(character, passiveId, choice) {
+    switch (passiveId) {
+      case 'invincible':
+        if (choice) {
+          const damageType = choice.toLowerCase();
+          if (character.affinities.damage[damageType] !== undefined) {
+            character.affinities.damage[damageType] -= 2;
+          }
+        }
+        break;
+
+      case 'unyielding':
+        if (choice) {
+          const staggerType = choice.toLowerCase();
+          if (character.affinities.stagger[staggerType] !== undefined) {
+            character.affinities.stagger[staggerType] -= 2;
+          }
+        }
+        break;
+
+      // Other passives that modify stats can be added here
+      default:
+        // Most passives don't modify base stats
+        break;
+    }
+  }
+
+  // Get Base E.G.O. passive manager
+  getBaseEgoPassiveManager() {
+    return baseEgoPassiveManager;
   }
 }

@@ -1,7 +1,11 @@
 import './style.css';
 import './progression-styles.css';
+import './skillCreator.css';
 import { AuthManager } from './auth.js';
 import './admin.js'; // Load admin utilities
+import { getBrandProfile, brandProfiles, themeHues, themeBrandMap, getThemeForBrand } from './themes/index.js';
+import { ref, onValue } from 'firebase/database';
+import { database } from './firebase.js';
 // import './testCharacters.js'; // Load test characters utilities
 // import './demoData.js'; // Load demo characters
 
@@ -10,20 +14,19 @@ class TerminalApp {
     this.authManager = new AuthManager();
     this.currentTime = new Date();
     this.isLoginMode = true;
-    this.currentTheme = 'gold';
-    this.themes = {
-      gold: 51,      // Gold (original)
-      blue: 220,     // Blue
-      green: 120,    // Green
-      red: 0,        // Red
-      purple: 265,   // Purple
-      cyan: 180,     // Cyan
-      orange: 30,    // Orange
-      pink: 320      // Pink
-    };
+    const storedTheme = localStorage.getItem('sotc-theme-key');
+    const storedBrand = localStorage.getItem('sotc-brand-key');
+    let initTheme = storedTheme || (storedBrand ? (getThemeForBrand(storedBrand) || null) : null) || 'gold';
+    this.currentTheme = initTheme;
+    this.changeTheme(this.currentTheme);
+    const mappedBrand = themeBrandMap[this.currentTheme] || storedBrand || 'default';
+    this.brandKey = mappedBrand;
+    this.brand = getBrandProfile(this.brandKey);
     this.initializeSystemData();
     this.init();
     this.startClock();
+    this.newsItems = [];
+    this.startNewsListener();
   }
 
   init() {
@@ -62,33 +65,60 @@ class TerminalApp {
   }
 
   changeTheme(themeName) {
-    this.currentTheme = themeName;
-    const hue = this.themes[themeName];
-    document.documentElement.style.setProperty('--base-hue', hue);
+    if (themeName in themeHues) {
+      this.currentTheme = themeName;
+      const hue = themeHues[themeName];
+      document.documentElement.style.setProperty('--base-hue', hue);
+    }
   }
 
   render() {
+    const hasVisitorsOverride = this.brand.systemOverrides && Object.prototype.hasOwnProperty.call(this.brand.systemOverrides, 'visitors');
+    const sd = { ...this.systemData, ...(this.brand.systemOverrides || {}) };
+    if (!hasVisitorsOverride) {
+      sd.visitors = Math.floor(Math.random() * 100) + 50;
+    }
+    const defaultInstructions = '• Use the forms to login or register<br>• Change theme colors using the selector above<br>• All data is encrypted and secure<br>• GM access requires manual promotion';
+    const labels = Object.assign({
+      systemStatus: 'System Status',
+      instructions: 'Instructions',
+      generalInfo: 'General Information',
+      liveData: 'Live Data Transmission',
+      systemControl: 'System Control',
+      status: 'Status',
+      security: 'Security',
+      accessLevel: 'Access Level',
+      time: 'Time',
+      location: 'Location',
+      ipAddress: 'IP Address',
+      device: 'Client Device',
+      visitors: 'Connected Users',
+      dataFileSecurity: 'Data File Security',
+      connectionStatus: 'Connection Status',
+      netConnection: 'NetConnection Seed',
+      powerControl: 'Power Distribution',
+      cpuTemp: 'CPU Temperature',
+      encryptionMethod: 'Encryption Method',
+      alarmStatus: 'Alarm Status'
+    }, this.brand.fieldLabels || {});
+    const leftPanel = Object.assign({
+      status: 'ONLINE',
+      security: 'SECURE',
+      accessLevel: 'GUEST',
+      instructionsHtml: this.brand.instructionsHtml || defaultInstructions
+    }, (this.brand.leftPanel || {}));
     document.querySelector('#app').innerHTML = `
       <div class="scanlines"></div>
       <div class="terminal-container">
         <div class="terminal-header">
           <div class="header-left">
             <div class="communication-tab">COMMUNICATION</div>
-            <div class="dashboard-tab">LCORPNET DASHBOARD</div>
+            <div class="dashboard-tab">${this.brand.brand} DASHBOARD</div>
           </div>
           <div class="header-right">
             <div class="theme-selector">
               <label>Theme:</label>
-              <select id="theme-select">
-                <option value="gold">Gold</option>
-                <option value="blue">Blue</option>
-                <option value="green">Green</option>
-                <option value="red">Red</option>
-                <option value="purple">Purple</option>
-                <option value="cyan">Cyan</option>
-                <option value="orange">Orange</option>
-                <option value="pink">Pink</option>
-              </select>
+              <select id="theme-select"></select>
             </div>
             <span>General Information</span>
           </div>
@@ -96,29 +126,24 @@ class TerminalApp {
 
         <div class="left-panel">
           <div class="panel-section">
-            <div class="panel-title">System Status</div>
+            <div class="panel-title">${labels.systemStatus}</div>
             <div class="panel-item">
-              <span class="panel-label">Status:</span>
-              <span class="panel-value success">ONLINE</span>
+              <span class="panel-label">${labels.status}:</span>
+              <span class="panel-value success">${leftPanel.status}</span>
             </div>
             <div class="panel-item">
-              <span class="panel-label">Security:</span>
-              <span class="panel-value success">SECURE</span>
+              <span class="panel-label">${labels.security}:</span>
+              <span class="panel-value success">${leftPanel.security}</span>
             </div>
             <div class="panel-item">
-              <span class="panel-label">Access Level:</span>
-              <span class="panel-value warning">GUEST</span>
+              <span class="panel-label">${labels.accessLevel}:</span>
+              <span class="panel-value warning">${leftPanel.accessLevel}</span>
             </div>
           </div>
 
           <div class="panel-section">
-            <div class="panel-title">Instructions</div>
-            <div style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6;">
-              • Use the forms to login or register<br>
-              ��� Change theme colors using the selector above<br>
-              • All data is encrypted and secure<br>
-              • GM access requires manual promotion
-            </div>
+            <div class="panel-title">${labels.instructions}</div>
+            <div class="instructions-text">${leftPanel.instructionsHtml}</div>
           </div>
         </div>
 
@@ -126,9 +151,9 @@ class TerminalApp {
           <div class="corner-brackets"></div>
           
           <div class="terminal-content">
-            <div class="terminal-title">LCORPNET DIRECT</div>
-            <div class="terminal-title">ACCESS TERMINAL</div>
-            <div class="terminal-subtitle">PROJECT MOON NETWORK</div>
+            <div class="terminal-title">${this.brand.title1}</div>
+            <div class="terminal-title">${this.brand.title2}</div>
+            <div class="terminal-subtitle">${this.brand.subtitle}</div>
 
 
 
@@ -147,11 +172,11 @@ class TerminalApp {
               <form class="auth-form ${this.isLoginMode ? 'active' : ''}" id="login-form">
                 <div class="form-group">
                   <label class="form-label">USERNAME</label>
-                  <input type="text" class="form-input" id="login-username" placeholder="Enter your username" required>
+                  <input type="text" class="form-input" id="login-username" placeholder="${this.brand.placeholders.username}" required>
                 </div>
                 <div class="form-group">
                   <label class="form-label">PASSWORD</label>
-                  <input type="password" class="form-input" id="login-password" placeholder="Enter your password" required>
+                  <input type="password" class="form-input" id="login-password" placeholder="${this.brand.placeholders.password}" required>
                 </div>
                 <button type="submit" class="btn-primary" id="login-btn">
                   ACCESS SYSTEM
@@ -161,11 +186,11 @@ class TerminalApp {
               <form class="auth-form ${!this.isLoginMode ? 'active' : ''}" id="register-form">
                 <div class="form-group">
                   <label class="form-label">USERNAME</label>
-                  <input type="text" class="form-input" id="register-username" placeholder="Choose a username" required>
+                  <input type="text" class="form-input" id="register-username" placeholder="${this.brand.placeholders.username}" required>
                 </div>
                 <div class="form-group">
                   <label class="form-label">PASSWORD</label>
-                  <input type="password" class="form-input" id="register-password" placeholder="Create a password" required>
+                  <input type="password" class="form-input" id="register-password" placeholder="${this.brand.placeholders.password}" required>
                 </div>
                 <button type="submit" class="btn-primary" id="register-btn">
                   CREATE ACCOUNT
@@ -177,79 +202,138 @@ class TerminalApp {
 
         <div class="right-panel">
           <div class="panel-section">
-            <div class="panel-title">General Information</div>
+            <div class="panel-title">${labels.generalInfo}</div>
             <div class="panel-item">
-              <span class="panel-label">Time:</span>
+              <span class="panel-label">${labels.time}:</span>
               <span class="panel-value system-time" id="system-time">${this.currentTime.toTimeString().split(' ')[0]}</span>
             </div>
             <div class="panel-item">
-              <span class="panel-label">Location:</span>
-              <span class="panel-value">${this.systemData.location}</span>
+              <span class="panel-label">${labels.location}:</span>
+              <span class="panel-value">${sd.location}</span>
             </div>
             <div class="panel-item">
-              <span class="panel-label">IP Address:</span>
-              <span class="panel-value error">${this.systemData.ipAddress}</span>
+              <span class="panel-label">${labels.ipAddress}:</span>
+              <span class="panel-value error">${sd.ipAddress}</span>
             </div>
             <div class="panel-item">
-              <span class="panel-label">Client Device:</span>
-              <span class="panel-value">${this.systemData.device}</span>
+              <span class="panel-label">${labels.device}:</span>
+              <span class="panel-value">${sd.device}</span>
             </div>
             <div class="panel-item">
-              <span class="panel-label">Connected Users:</span>
-              <span class="panel-value">${this.systemData.visitors}</span>
-            </div>
-          </div>
-
-          <div class="panel-section">
-            <div class="panel-title">Live Data Transmission</div>
-            <div class="panel-item">
-              <span class="panel-label">Data File Security:</span>
-              <span class="panel-value success">${this.systemData.security}</span>
-            </div>
-            <div class="panel-item">
-              <span class="panel-label">Connection Status:</span>
-              <span class="panel-value success">${this.systemData.connectionStatus}</span>
-            </div>
-            <div class="panel-item">
-              <span class="panel-label">NetConnection Seed:</span>
-              <span class="panel-value" style="font-size: 0.7rem;">${this.systemData.netConnection}</span>
+              <span class="panel-label">${labels.visitors}:</span>
+              <span class="panel-value">${sd.visitors}</span>
             </div>
           </div>
 
           <div class="panel-section">
-            <div class="panel-title">System Control</div>
+            <div class="panel-title">${labels.liveData}</div>
             <div class="panel-item">
-              <span class="panel-label">Power Distribution:</span>
-              <span class="panel-value success">${this.systemData.powerControl}</span>
+              <span class="panel-label">${labels.dataFileSecurity}:</span>
+              <span class="panel-value success">${sd.security}</span>
             </div>
             <div class="panel-item">
-              <span class="panel-label">CPU Temperature:</span>
-              <span class="panel-value">${this.systemData.cpuTemp}</span>
+              <span class="panel-label">${labels.connectionStatus}:</span>
+              <span class="panel-value success">${sd.connectionStatus}</span>
             </div>
             <div class="panel-item">
-              <span class="panel-label">Encryption Method:</span>
-              <span class="panel-value">${this.systemData.encryptionMethod}</span>
+              <span class="panel-label">${labels.netConnection}:</span>
+              <span class="panel-value" style="font-size: 0.7rem;">${sd.netConnection}</span>
+            </div>
+          </div>
+
+          <div class="panel-section">
+            <div class="panel-title">${labels.systemControl}</div>
+            <div class="panel-item">
+              <span class="panel-label">${labels.powerControl}:</span>
+              <span class="panel-value success">${sd.powerControl}</span>
             </div>
             <div class="panel-item">
-              <span class="panel-label">Alarm Status:</span>
-              <span class="panel-value success">${this.systemData.alarmStatus}</span>
+              <span class="panel-label">${labels.cpuTemp}:</span>
+              <span class="panel-value">${sd.cpuTemp}</span>
+            </div>
+            <div class="panel-item">
+              <span class="panel-label">${labels.encryptionMethod}:</span>
+              <span class="panel-value">${sd.encryptionMethod}</span>
+            </div>
+            <div class="panel-item">
+              <span class="panel-label">${labels.alarmStatus}:</span>
+              <span class="panel-value success">${sd.alarmStatus}</span>
             </div>
           </div>
         </div>
 
         <div class="terminal-footer">
-          LCORPNET DASHBOARD - LOCAL AUTH + FIREBASE DATABASE
+          <div id="footer-brand-text">${this.brand.brand} DASHBOARD - LOCAL AUTH + FIREBASE DATABASE</div>
+          <div class="news-ticker" id="news-ticker" style="display:none;">
+            <div class="news-track" id="news-track"></div>
+          </div>
         </div>
       </div>
     `;
+    setTimeout(() => this.updateNewsTicker(), 0);
+  }
+
+  startNewsListener() {
+    const newsRef = ref(database, 'newsTicker');
+    onValue(newsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const obj = snapshot.val();
+        this.newsItems = Object.values(obj).map(n => (typeof n.text === 'string' ? n.text : '')).filter(Boolean);
+      } else {
+        this.newsItems = [];
+      }
+      this.updateNewsTicker();
+    });
+  }
+
+  updateNewsTicker() {
+    const ticker = document.getElementById('news-ticker');
+    const track = document.getElementById('news-track');
+    const brandTextEl = document.getElementById('footer-brand-text');
+    if (!ticker || !track) return;
+    if (!this.newsItems.length) {
+      ticker.style.display = 'none';
+      if (brandTextEl) brandTextEl.style.display = 'block';
+      return;
+    }
+    if (brandTextEl) brandTextEl.style.display = 'none';
+    ticker.style.display = 'block';
+    const text = this.newsItems[Math.floor(Math.random() * this.newsItems.length)];
+    track.textContent = text;
+    // Restart animation
+    track.style.animation = 'none';
+    void track.offsetWidth;
+    track.style.animation = '';
+    track.classList.remove('animate');
+    void track.offsetWidth;
+    track.classList.add('animate');
   }
 
   attachEventListeners() {
-    // Theme selector
+    // Theme/Brand selector pairs
     const themeSelect = document.getElementById('theme-select');
+    themeSelect.innerHTML = '';
+    Object.entries(themeBrandMap).forEach(([themeKey, brandKey]) => {
+      const opt = document.createElement('option');
+      opt.value = themeKey;
+      const themeLabel = themeKey.charAt(0).toUpperCase() + themeKey.slice(1);
+      const brandLabel = (brandProfiles[brandKey] && brandProfiles[brandKey].brand) || brandKey;
+      opt.textContent = `${themeLabel} - ${brandLabel}`;
+      themeSelect.appendChild(opt);
+    });
     themeSelect.value = this.currentTheme;
     themeSelect.addEventListener('change', (e) => {
-      this.changeTheme(e.target.value);
+      const theme = e.target.value;
+      this.changeTheme(theme);
+      const brandKey = themeBrandMap[theme];
+      if (brandKey) {
+        this.brand = getBrandProfile(brandKey);
+        this.brandKey = brandKey;
+      }
+      localStorage.setItem('sotc-theme-key', theme);
+      localStorage.setItem('sotc-brand-key', this.brandKey);
+      this.render();
+      this.attachEventListeners();
     });
 
     // Form toggle buttons
