@@ -1560,32 +1560,36 @@ export class CharacterSheet {
   }
 
   renderBaseEgoCreator() {
-    console.log('renderBaseEgoCreator called');
-    console.log('baseEgoCreator instance:', this.baseEgoCreator);
+    if (!this.baseEgoCreator) return '<div class="error">Base E.G.O. creator not initialized</div>';
 
-    if (!this.baseEgoCreator) {
-      console.log('baseEgoCreator is null/undefined');
-      return '<div class="error">Base E.G.O. creator not initialized</div>';
-    }
+    const state = { currentStep: this.baseEgoCreator.currentStep };
 
-    console.log('Trying to render baseEgoCreator...');
+    return `
+      <div class="terminal-title">SKILL CREATOR</div>
+      <div class="terminal-subtitle">Create Base E.G.O. — same workflow as Skill Creator</div>
 
-    try {
-      const renderedContent = this.baseEgoCreator.render();
-      console.log('BaseEgoCreator render result:', renderedContent);
-
-      return `
-        <div class="terminal-title">CREATE BASE E.G.O.</div>
-        <div class="terminal-subtitle">Craft your soul's manifestation</div>
-
-        <div class="base-ego-creator-container">
-          ${renderedContent}
+      <div class="skill-creator-container base-ego-creator">
+        <div class="creator-header">
+          <div class="creator-steps">
+            <div class="step ${state.currentStep === 'selectBase' ? 'active' : state.currentStep === 'configureDice' || state.currentStep === 'addModules' || state.currentStep === 'finalize' ? 'completed' : ''}">1. Select Base</div>
+            <div class="step ${state.currentStep === 'configureDice' ? 'active' : state.currentStep === 'addModules' || state.currentStep === 'finalize' ? 'completed' : ''}">2. Configure Dice</div>
+            <div class="step ${state.currentStep === 'addModules' ? 'active' : state.currentStep === 'finalize' ? 'completed' : ''}">3. Add Modules</div>
+            <div class="step ${state.currentStep === 'chooseBenefit' ? 'active' : state.currentStep === 'selectPassive' || state.currentStep === 'finalize' ? 'completed' : ''}">4. Choose Benefit</div>
+            <div class="step ${state.currentStep === 'selectPassive' ? 'active' : state.currentStep === 'finalize' ? 'completed' : ''}">5. Select Passive</div>
+            <div class="step ${state.currentStep === 'finalize' ? 'active' : ''}">6. Finalize</div>
+          </div>
+          <button class="btn-secondary" id="cancel-ego-btn">CANCEL</button>
         </div>
-      `;
-    } catch (error) {
-      console.error('Error rendering BaseEgoCreator:', error);
-      return `<div class="error">Error rendering Base E.G.O. creator: ${error.message}</div>`;
-    }
+
+        <div class="step-panel">
+          ${this.baseEgoCreator.renderCurrentStep()}
+        </div>
+
+        <div class="skill-preview">
+          ${this.baseEgoCreator.renderEgoPreview()}
+        </div>
+      </div>
+    `;
   }
 
   attachEditListeners() {
@@ -2432,16 +2436,40 @@ export class CharacterSheet {
                 <div class="rank-section">
                   <h5>Tier ${rank} Modules</h5>
                   <div class="available-modules">
-                    ${skillModulesManager.getModulesByRank(rank).map(module => `
-                      <div class="module-option ${this.canAddModule(skill, module) ? '' : 'disabled'}"
-                           data-module-id="${module.id}"
-                           data-module-rank="${rank}"
-                           data-is-spare="false">
-                        <div class="module-name">${module.name}</div>
-                        <div class="module-effect">${module.effect}</div>
-                        ${module.target === 'die' ? '<div class="requires-target">Requires target die</div>' : ''}
-                      </div>
-                    `).join('')}
+                    ${(() => {
+                      const modules = skillModulesManager.getModulesByRank(rank);
+                      const families = {
+                        burning: ['burning_die_hit','burning_die_clashwin','burning_all_hit','burning_all_clashwin'],
+                        tremoring: ['tremoring_die_hit','tremoring_die_clashwin','tremoring_all_hit','tremoring_all_clashwin'],
+                        bleeding: ['bleeding_die_hit','bleeding_die_clashwin','bleeding_all_hit','bleeding_all_clashwin'],
+                        sinking: ['sinking_die_hit','sinking_die_clashwin','sinking_all_hit','sinking_all_clashwin'],
+                        blazing: ['blazing_die_hit','blazing_die_clashwin'],
+                        fast: ['fast_on_use','fast_after_use'],
+                        unstable: ['unstable_burst_hit','unstable_burst_clashwin']
+                      };
+                      const familyIds = new Set(Object.values(families).flatMap(a => a));
+                      const moduleMap = new Map(modules.map(m => [m.id, m]));
+                      const display = modules.filter(m => !familyIds.has(m.id));
+                      const familyNames = { burning: 'Burning', tremoring: 'Tremoring', bleeding: 'Bleeding', sinking: 'Sinking', blazing: 'Blazing', fast: 'Fast', unstable: 'Unstable Burst' };
+                      Object.entries(families).forEach(([key, ids]) => {
+                        if (ids.some(id => moduleMap.has(id))) {
+                          display.push({ id: `group_${key}`, name: familyNames[key] || (key.charAt(0).toUpperCase() + key.slice(1)), effect: 'Choose a variant to apply', _family: key, rank });
+                        }
+                      });
+                      return display.map(module => {
+                        const isGroup = !!module._family;
+                        const disabled = isGroup ? '' : (this.canAddModule(skill, module) ? '' : 'disabled');
+                        return `
+                          <div class="module-option ${disabled}"
+                               data-module-id="${module.id}"
+                               data-module-rank="${rank}"
+                               data-is-spare="false" ${isGroup ? `data-group="${module._family}"` : ''}>
+                            <div class="module-name">${module.name}${isGroup ? ' (Choose Variant)' : ''}</div>
+                            <div class="module-effect">${module.effect}</div>
+                            ${!isGroup && module.target === 'die' ? '<div class="requires-target">Requires target die</div>' : ''}
+                          </div>`;
+                      }).join('');
+                    })()}
                   </div>
                 </div>
               `).join('')}
@@ -2460,16 +2488,40 @@ export class CharacterSheet {
                 <div class="rank-section">
                   <h5>Tier ${rank} Spare Modules</h5>
                   <div class="available-modules">
-                    ${skillModulesManager.getModulesByRank(rank).map(module => `
-                      <div class="module-option ${this.canAddSpareModule(skill, module, rank, availableSpareModules) ? '' : 'disabled'}"
-                           data-module-id="${module.id}"
-                           data-module-rank="${rank}"
-                           data-is-spare="true">
-                        <div class="module-name">${module.name}</div>
-                        <div class="module-effect">${module.effect}</div>
-                        ${module.target === 'die' ? '<div class="requires-target">Requires target die</div>' : ''}
-                      </div>
-                    `).join('')}
+                    ${(() => {
+                      const modules = skillModulesManager.getModulesByRank(rank);
+                      const families = {
+                        burning: ['burning_die_hit','burning_die_clashwin','burning_all_hit','burning_all_clashwin'],
+                        tremoring: ['tremoring_die_hit','tremoring_die_clashwin','tremoring_all_hit','tremoring_all_clashwin'],
+                        bleeding: ['bleeding_die_hit','bleeding_die_clashwin','bleeding_all_hit','bleeding_all_clashwin'],
+                        sinking: ['sinking_die_hit','sinking_die_clashwin','sinking_all_hit','sinking_all_clashwin'],
+                        blazing: ['blazing_die_hit','blazing_die_clashwin'],
+                        fast: ['fast_on_use','fast_after_use'],
+                        unstable: ['unstable_burst_hit','unstable_burst_clashwin']
+                      };
+                      const familyIds = new Set(Object.values(families).flatMap(a => a));
+                      const moduleMap = new Map(modules.map(m => [m.id, m]));
+                      const display = modules.filter(m => !familyIds.has(m.id));
+                      const familyNames = { burning: 'Burning', tremoring: 'Tremoring', bleeding: 'Bleeding', sinking: 'Sinking', blazing: 'Blazing', fast: 'Fast', unstable: 'Unstable Burst' };
+                      Object.entries(families).forEach(([key, ids]) => {
+                        if (ids.some(id => moduleMap.has(id))) {
+                          display.push({ id: `group_${key}`, name: familyNames[key] || (key.charAt(0).toUpperCase() + key.slice(1)), effect: 'Choose a variant to apply', _family: key, rank });
+                        }
+                      });
+                      return display.map(module => {
+                        const isGroup = !!module._family;
+                        const disabled = isGroup ? '' : (this.canAddSpareModule(skill, module, rank, availableSpareModules) ? '' : 'disabled');
+                        return `
+                          <div class="module-option ${disabled}"
+                               data-module-id="${module.id}"
+                               data-module-rank="${rank}"
+                               data-is-spare="true" ${isGroup ? `data-group="${module._family}"` : ''}>
+                            <div class="module-name">${module.name}${isGroup ? ' (Choose Variant)' : ''}</div>
+                            <div class="module-effect">${module.effect}</div>
+                            ${!isGroup && module.target === 'die' ? '<div class="requires-target">Requires target die</div>' : ''}
+                          </div>`;
+                      }).join('');
+                    })()}
                   </div>
                 </div>
               `).join('')}
@@ -2649,23 +2701,37 @@ export class CharacterSheet {
       });
     });
 
-    // Module selection (scope to skill creator only)
-    document.querySelectorAll('.skill-creator-container .module-option:not(.disabled)').forEach(option => {
-      option.addEventListener('click', () => {
-        const moduleId = option.dataset.moduleId;
+    // Module selection (scope to skill creator only) - use event delegation to avoid duplicate listeners
+    const moduleContainer = document.querySelector('.skill-creator-container');
+    if (moduleContainer && !moduleContainer.dataset.moduleListenerAttached) {
+      moduleContainer.addEventListener('click', async (e) => {
+        // Module removal has priority
+        const removeBtn = e.target.closest('.btn-remove');
+        if (removeBtn && moduleContainer.contains(removeBtn)) {
+          const moduleIndex = parseInt(removeBtn.dataset.moduleIndex);
+          this.removeModuleFromSkill(moduleIndex);
+          return;
+        }
+
+        const option = e.target.closest('.module-option:not(.disabled)');
+        if (!option || !moduleContainer.contains(option)) return;
+
+        const group = option.dataset.group || null;
         const moduleRank = parseInt(option.dataset.moduleRank);
         const isSpare = option.dataset.isSpare === 'true';
-        this.addModuleToSkill(moduleId, moduleRank, isSpare);
-      });
-    });
 
-    // Module removal (scope to skill creator only)
-    document.querySelectorAll('.skill-creator-container .btn-remove').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const moduleIndex = parseInt(btn.dataset.moduleIndex);
-        this.removeModuleFromSkill(moduleIndex);
+        if (group) {
+          const variantId = await this.showGroupedModuleSelectionDialog(group);
+          if (!variantId) return;
+          await this.addModuleToSkill(variantId, moduleRank, isSpare);
+          return;
+        }
+
+        const moduleId = option.dataset.moduleId;
+        await this.addModuleToSkill(moduleId, moduleRank, isSpare);
       });
-    });
+      moduleContainer.dataset.moduleListenerAttached = '1';
+    }
 
     // Step navigation
     const proceedToModulesBtn = document.getElementById('proceed-to-modules');
@@ -2758,16 +2824,89 @@ export class CharacterSheet {
   async addModuleToSkill(moduleId, moduleRank, isSpare) {
     const module = skillModulesManager.getModuleById(moduleId, moduleRank);
 
+    // Handle modules with options (e.g., Comeback)
+    if (module && module.requiresOption && Array.isArray(module.options)) {
+      const optionId = await this.showModuleOptionSelectionDialog(module);
+      if (!optionId) return; // cancelled
+      const chosen = module.options.find(o => o.id === optionId) || module.options[0];
+
+      let targetDieId = null;
+      if (chosen.selection?.type === 'die') {
+        // Build die list, respecting constraints like excludeFinal
+        let dice = (this.skillCreator.currentSkill?.dice || []).slice();
+        if (chosen.selection.excludeFinal) {
+          dice = dice.slice(0, Math.max(0, dice.length - 1));
+        }
+        const disabledIds = (module.tag ? dice.filter(d => (d.effects||[]).some(e => e.tag === module.tag)).map(d => d.id) : []);
+        const selectable = dice.filter(d => !disabledIds.includes(d.id));
+        if (selectable.length === 0) {
+          this.showMessage('No suitable dice available for this option', 'error');
+          return;
+        }
+        if (chosen.selection.count && chosen.selection.count > 1) {
+          const selectedIds = await this.showMultiTargetDieSelectionDialog(selectable, module.name, chosen.selection.count, disabledIds, module.tag);
+          if (!selectedIds || selectedIds.length !== chosen.selection.count) return;
+          const result = this.skillCreator.addModule(moduleId, moduleRank, null, isSpare, { optionId, targetDieIds: selectedIds });
+          if (result.success) { this.render(); this.attachEventListeners(); } else { this.showMessage(result.error, 'error'); }
+          return;
+        }
+        if (selectable.length === 1) {
+          targetDieId = selectable[0].id;
+        } else {
+          const selectedDieId = await this.showTargetDieSelectionDialog(dice, module.name, disabledIds, module.tag);
+          if (!selectedDieId) return; // cancelled
+          if (disabledIds.includes(selectedDieId)) return; // safety
+          targetDieId = selectedDieId;
+        }
+      }
+
+      const result = this.skillCreator.addModule(moduleId, moduleRank, targetDieId, isSpare, { optionId });
+      if (result.success) {
+        this.render();
+        this.attachEventListeners();
+      } else {
+        this.showMessage(result.error, 'error');
+      }
+      return;
+    }
+
     // If module requires target die, handle target selection
     if (module && module.target === 'die') {
       const availableDice = this.skillCreator.getAvailableTargetDice(module);
+      const disabledIds = (module.tag ? availableDice.filter(d => (d.effects||[]).some(e => e.tag === module.tag)).map(d => d.id) : []);
+      const selectable = availableDice.filter(d => !disabledIds.includes(d.id));
 
-      if (availableDice.length === 0) {
+      // Determine required count (e.g., Forceful count=2 when cost>=3)
+      const schema = skillModulesManager.getModuleSelectionSchema(moduleId, moduleRank, { skill: { cost: this.skillCreator.currentSkill?.cost || 0 } }) || { type: 'die', count: 1 };
+      let requiredCount = Math.max(1, Number(schema.count || 1));
+      if (schema.countFromCost) {
+        const costCount = (this.skillCreator.currentSkill?.cost || 0) || 1;
+        requiredCount = Math.max(1, costCount);
+      }
+
+      if (selectable.length === 0) {
         this.showMessage('No suitable dice available for this module', 'error');
         return;
-      } else if (availableDice.length === 1) {
-        // Auto-select if only one die is available
-        const result = this.skillCreator.addModule(moduleId, moduleRank, availableDice[0].id, isSpare);
+      }
+
+      if (requiredCount > 1) {
+        // Multi-select dialog
+        requiredCount = Math.min(requiredCount, selectable.length);
+        const selectedIds = await this.showMultiTargetDieSelectionDialog(availableDice, module.name, requiredCount, disabledIds, module.tag);
+        if (!selectedIds || selectedIds.length !== requiredCount) return;
+        const result = this.skillCreator.addModule(moduleId, moduleRank, null, isSpare, { targetDieIds: selectedIds });
+        if (result.success) {
+          this.render();
+          this.attachEventListeners();
+        } else {
+          this.showMessage(result.error, 'error');
+        }
+        return;
+      }
+
+      if (selectable.length === 1) {
+        // Auto-select if only one valid die is available
+        const result = this.skillCreator.addModule(moduleId, moduleRank, selectable[0].id, isSpare);
         if (result.success) {
           this.render();
           this.attachEventListeners();
@@ -2775,10 +2914,10 @@ export class CharacterSheet {
           this.showMessage(result.error, 'error');
         }
       } else {
-        // Show target die selection dialog
-        const selectedDieId = await this.showTargetDieSelectionDialog(availableDice, module.name);
+        // Show target die selection dialog (disabled where tag duplicates)
+        const selectedDieId = await this.showTargetDieSelectionDialog(availableDice, module.name, disabledIds, module.tag);
 
-        if (selectedDieId) {
+        if (selectedDieId && !disabledIds.includes(selectedDieId)) {
           const result = this.skillCreator.addModule(moduleId, moduleRank, selectedDieId, isSpare);
           if (result.success) {
             this.render();
@@ -3155,7 +3294,7 @@ export class CharacterSheet {
           <div class="modal-content">
             <div class="modal-header">
               <h3>Major Stat Increase</h3>
-              <button class="modal-close" onclick="this.closeStatBoostModal(false)">×</button>
+              <button class="modal-close" onclick="this.closeStatBoostModal(false)">��</button>
             </div>
             <div class="modal-body">
               <p>Increase 2 different stats by 1, and another stat by 2</p>
@@ -3437,83 +3576,178 @@ export class CharacterSheet {
   setupBaseEgoCreatorEventListeners() {
     if (!this.baseEgoCreator) return;
 
-    // Base selection
-    document.querySelectorAll('.base-card').forEach(card => {
-      card.addEventListener('click', () => {
-        const baseId = card.dataset.baseId;
-        this.baseEgoCreator.selectBase(baseId);
-        this.updateBaseEgoCreatorDisplay();
-      });
-    });
+    const container = document.querySelector('.base-ego-creator');
+    if (!container) return;
 
-    // Module selection
-    document.querySelectorAll('.module-card:not(.disabled)').forEach(card => {
-      card.addEventListener('click', () => {
-        const moduleId = card.dataset.moduleId;
-        const moduleRank = parseInt(card.dataset.moduleRank);
-        this.baseEgoCreator.selectModule(moduleId, moduleRank);
-        this.updateBaseEgoCreatorDisplay();
-      });
-    });
+    // Attach a single delegated listener
+    if (!container.dataset.baseEgoListeners) {
+      container.addEventListener('click', async (e) => {
+        const baseCard = e.target.closest('.base-card');
+        if (baseCard && container.contains(baseCard)) {
+          const baseId = baseCard.dataset.baseId;
+          this.baseEgoCreator.selectBase(baseId);
+          this.updateBaseEgoCreatorDisplay();
+          return;
+        }
 
-    // Benefit selection
-    document.querySelectorAll('.benefit-option').forEach(option => {
-      option.addEventListener('click', () => {
-        const benefit = option.dataset.benefit;
-        this.baseEgoCreator.selectBenefit(benefit);
-        this.updateBaseEgoCreatorDisplay();
-      });
-    });
+        const moduleCard = e.target.closest('.module-card:not(.disabled)');
+        if (moduleCard && container.contains(moduleCard)) {
+          const moduleId = moduleCard.dataset.moduleId;
+          const moduleRank = parseInt(moduleCard.dataset.moduleRank);
+          const module = skillModulesManager.getModuleById(moduleId, moduleRank);
 
-    // Passive selection
-    document.querySelectorAll('.passive-card').forEach(card => {
-      card.addEventListener('click', () => {
-        const passiveId = card.dataset.passiveId;
-        this.baseEgoCreator.selectPassive(passiveId);
-        this.updateBaseEgoCreatorDisplay();
-      });
-    });
+          let optionId = null;
+          if (module && module.requiresOption && Array.isArray(module.options)) {
+            optionId = await this.showModuleOptionSelectionDialog(module);
+            if (!optionId) return; // cancelled
+          }
 
-    // Passive choice
-    document.querySelectorAll('.choice-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const choice = btn.dataset.choice;
-        this.baseEgoCreator.selectPassiveChoice(choice);
-        this.updateBaseEgoCreatorDisplay();
-      });
-    });
+          // If module requires a target die, prompt same as Skill Creator
+          if (module && module.target === 'die') {
+            const dice = (this.baseEgoCreator.baseEgo.dice || []).map(d => ({ id: d.id, tag: d.tag, notation: d.notation, type: d.tag && d.tag.includes('Evade') ? 'evade' : (d.tag && d.tag.includes('Block') ? 'block' : 'offensive') }));
+            const allSelectedModules = [
+              ...this.baseEgoCreator.baseEgo.modules.rank1,
+              ...this.baseEgoCreator.baseEgo.modules.rank2,
+              ...this.baseEgoCreator.baseEgo.modules.rank3
+            ];
+            const disabledIds = module.tag ? dice.filter(d => allSelectedModules.some(m => m.targetDieId === d.id && m.tag === module.tag)).map(d => d.id) : [];
+            const selectable = dice.filter(d => !disabledIds.includes(d.id));
 
-    // E.G.O. name input
-    const egoNameInput = document.getElementById('ego-name');
-    if (egoNameInput) {
-      egoNameInput.addEventListener('input', (e) => {
-        this.baseEgoCreator.setEgoName(e.target.value);
-        this.updateBaseEgoCreatorDisplay();
-      });
-    }
+            if (selectable.length === 0) {
+              this.showMessage('No suitable dice available for this module', 'error');
+              return;
+            }
 
-    // Navigation buttons
-    const nextBtn = document.getElementById('next-step-btn');
-    if (nextBtn) {
-      nextBtn.addEventListener('click', () => {
-        this.baseEgoCreator.nextStep();
-        this.updateBaseEgoCreatorDisplay();
-      });
-    }
+            if (selectable.length === 1) {
+              const result = this.baseEgoCreator.selectModule(moduleId, moduleRank, optionId, selectable[0].id);
+              if (!result || !result.success) this.showMessage(result?.error || 'Error adding module', 'error');
+              this.updateBaseEgoCreatorDisplay();
+              return;
+            }
 
-    const backBtn = document.getElementById('back-step-btn');
-    if (backBtn) {
-      backBtn.addEventListener('click', () => {
-        this.baseEgoCreator.previousStep();
-        this.updateBaseEgoCreatorDisplay();
-      });
-    }
+            const selectedDieId = await this.showTargetDieSelectionDialog(dice, module.name, disabledIds, module.tag);
+            if (!selectedDieId) return; // cancelled
+            const result = this.baseEgoCreator.selectModule(moduleId, moduleRank, optionId, selectedDieId);
+            if (!result || !result.success) this.showMessage(result?.error || 'Error adding module', 'error');
+            this.updateBaseEgoCreatorDisplay();
+            return;
+          }
 
-    const cancelBtn = document.getElementById('cancel-ego-btn');
-    if (cancelBtn) {
-      cancelBtn.addEventListener('click', () => {
-        this.baseEgoCreator.cancel();
+          // Skill-level module (no die target)
+          const result = this.baseEgoCreator.selectModule(moduleId, moduleRank, optionId, null);
+          if (!result || !result.success) this.showMessage(result?.error || 'Error adding module', 'error');
+          this.updateBaseEgoCreatorDisplay();
+          return;
+        }
+
+        const benefit = e.target.closest('.benefit-option');
+        if (benefit && container.contains(benefit)) {
+          const b = benefit.dataset.benefit;
+          this.baseEgoCreator.selectBenefit(b);
+          this.updateBaseEgoCreatorDisplay();
+          return;
+        }
+
+        const passiveCard = e.target.closest('.passive-card');
+        if (passiveCard && container.contains(passiveCard)) {
+          const passiveId = passiveCard.dataset.passiveId;
+          this.baseEgoCreator.selectPassive(passiveId);
+          this.updateBaseEgoCreatorDisplay();
+          return;
+        }
+
+        const choiceBtn = e.target.closest('.choice-btn');
+        if (choiceBtn && container.contains(choiceBtn)) {
+          const choice = choiceBtn.dataset.choice;
+          this.baseEgoCreator.selectPassiveChoice(choice);
+          this.updateBaseEgoCreatorDisplay();
+          return;
+        }
+
+        const removeBtn = e.target.closest('.remove-module-btn');
+        if (removeBtn && container.contains(removeBtn)) {
+          const moduleId = removeBtn.dataset.moduleId;
+          const moduleRank = parseInt(removeBtn.dataset.moduleRank);
+          if (moduleId) this.baseEgoCreator.removeModule(moduleId, moduleRank);
+          this.updateBaseEgoCreatorDisplay();
+          return;
+        }
+
+        // Create/cancel/back/next buttons
+        const nextBtn = e.target.closest('#next-step-btn');
+        if (nextBtn && container.contains(nextBtn)) {
+          this.baseEgoCreator.nextStep();
+          this.updateBaseEgoCreatorDisplay();
+          return;
+        }
+        const backBtn = e.target.closest('#back-step-btn');
+        if (backBtn && container.contains(backBtn)) {
+          this.baseEgoCreator.previousStep();
+          this.updateBaseEgoCreatorDisplay();
+          return;
+        }
+        const createBtn = e.target.closest('#create-ego-btn');
+        if (createBtn && container.contains(createBtn)) {
+          const result = this.baseEgoCreator.finalizeEgo();
+          if (!result || !result.success) {
+            this.showMessage(result?.error || 'Cannot finalize E.G.O. Please check requirements', 'error');
+            return;
+          }
+          // finalizeEgo will call onSave via the creator, characterSheet has onBaseEgoSaved handler which calls save
+          // After finalize, close creator
+          this.showingBaseEgoCreator = false;
+          this.baseEgoCreator = null;
+          this.render();
+          this.attachEventListeners();
+          return;
+        }
+        const cancelBtn = e.target.closest('#cancel-ego-btn');
+        if (cancelBtn && container.contains(cancelBtn)) {
+          this.baseEgoCreator.cancel();
+          return;
+        }
       });
+
+      // Delegated change handler for die types and ego inputs
+      container.addEventListener('change', async (e) => {
+        const select = e.target.closest('.die-type-select');
+        if (select) {
+          const dieId = select.dataset.dieId;
+          const damageType = select.value;
+          const die = this.baseEgoCreator.baseEgo.dice.find(d => d.id === dieId);
+          if (die) {
+            die.chosenType = damageType || null;
+            die.tag = damageType ? `[${damageType}]` : die.originalTag;
+            this.updateBaseEgoCreatorDisplay();
+          }
+          return;
+        }
+
+        const nameInput = e.target.closest('#ego-name');
+        if (nameInput) {
+          this.baseEgoCreator.setEgoName(nameInput.value || '');
+          this.updateBaseEgoCreatorDisplay();
+          return;
+        }
+
+        const descInput = e.target.closest('#ego-desc');
+        if (descInput) {
+          this.baseEgoCreator.setEgoDescription(descInput.value || '');
+          this.updateBaseEgoCreatorDisplay();
+          return;
+        }
+
+        const imgInput = e.target.closest('#ego-image-input');
+        if (imgInput) {
+          const file = imgInput.files && imgInput.files[0];
+          if (file) await this.baseEgoCreator.setEgoImage(file);
+          else await this.baseEgoCreator.setEgoImage(null);
+          this.updateBaseEgoCreatorDisplay();
+          return;
+        }
+      });
+
+      container.dataset.baseEgoListeners = '1';
     }
   }
 
@@ -3847,17 +4081,112 @@ export class CharacterSheet {
       return;
     }
 
+    // Group families (render as one, choose variant on click)
+    const families = {
+      burning: {
+        name: 'Burning',
+        ids: ['burning_die_hit','burning_die_clashwin','burning_all_hit','burning_all_clashwin'],
+        options: [
+          { id: 'burning_die_hit', label: 'One Die — [Hit] Inflict 1 Burn (or {Cost+1} if defined)' },
+          { id: 'burning_die_clashwin', label: 'One Die — [Clash Win] Inflict 1 Burn (or {Cost+1} if defined)' },
+          { id: 'burning_all_hit', label: 'All Dice — [Hit] Inflict 1 Burn' },
+          { id: 'burning_all_clashwin', label: 'All Dice — [Clash Win] Inflict 1 Burn' }
+        ]
+      },
+      tremoring: {
+        name: 'Tremoring',
+        ids: ['tremoring_die_hit','tremoring_die_clashwin','tremoring_all_hit','tremoring_all_clashwin'],
+        options: [
+          { id: 'tremoring_die_hit', label: 'One Die — [Hit] Inflict {Cost} Tremor' },
+          { id: 'tremoring_die_clashwin', label: 'One Die — [Clash Win] Inflict {Cost} Tremor' },
+          { id: 'tremoring_all_hit', label: 'All Dice — [Hit] Inflict 1 Tremor' },
+          { id: 'tremoring_all_clashwin', label: 'All Dice — [Clash Win] Inflict 1 Tremor' }
+        ]
+      },
+      bleeding: {
+        name: 'Bleeding',
+        ids: ['bleeding_die_hit','bleeding_die_clashwin','bleeding_all_hit','bleeding_all_clashwin'],
+        options: [
+          { id: 'bleeding_die_hit', label: 'One Die — [Hit] Inflict {Cost} Bleed' },
+          { id: 'bleeding_die_clashwin', label: 'One Die — [Clash Win] Inflict {Cost} Bleed' },
+          { id: 'bleeding_all_hit', label: 'All Dice — [Hit] Inflict 1 Bleed' },
+          { id: 'bleeding_all_clashwin', label: 'All Dice — [Clash Win] Inflict 1 Bleed' }
+        ]
+      },
+      sinking: {
+        name: 'Sinking',
+        ids: ['sinking_die_hit','sinking_die_clashwin','sinking_all_hit','sinking_all_clashwin'],
+        options: [
+          { id: 'sinking_die_hit', label: 'One Die — [Hit] Inflict {Cost+1} Sinking' },
+          { id: 'sinking_die_clashwin', label: 'One Die — [Clash Win] Inflict {Cost+1} Sinking' },
+          { id: 'sinking_all_hit', label: 'All Dice — [Hit] Inflict 1 Sinking' },
+          { id: 'sinking_all_clashwin', label: 'All Dice — [Clash Win] Inflict 1 Sinking' }
+        ]
+      },
+      blazing: {
+        name: 'Blazing',
+        ids: ['blazing_die_hit','blazing_die_clashwin'],
+        options: [
+          { id: 'blazing_die_hit', label: 'One Die — [Hit] Trigger Blaze on target' },
+          { id: 'blazing_die_clashwin', label: 'One Die — [Clash Win] Trigger Blaze on target' }
+        ]
+      },
+      fast: {
+        name: 'Fast',
+        ids: ['fast_on_use','fast_after_use'],
+        options: [
+          { id: 'fast_on_use', label: '[On Use] Gain 1 Haste (2 if Cost ≥ 3)' },
+          { id: 'fast_after_use', label: '[After Use] Gain 1 Haste (2 if Cost ≥ 3)' }
+        ]
+      },
+      unstable: {
+        name: 'Unstable Burst',
+        ids: ['unstable_burst_hit','unstable_burst_clashwin'],
+        options: [
+          { id: 'unstable_burst_hit', label: 'One Die — [Hit] Trigger Tremor Burst, then reduce target’s Tremor by 4' },
+          { id: 'unstable_burst_clashwin', label: 'One non-evade Die — [Clash Win] Trigger Tremor Burst, then reduce target’s Tremor by 4' }
+        ]
+      }
+    };
+
+    const allFamilyIds = new Set(Object.values(families).flatMap(f => f.ids));
+
+    // Build display list: filter out family variants and add one pseudo entry per family present
+    const displayList = [];
+    const moduleMap = new Map(modules.map(m => [m.id, m]));
+
+    modules.forEach(m => {
+      if (!allFamilyIds.has(m.id)) displayList.push(m);
+    });
+
+    Object.entries(families).forEach(([key, fam]) => {
+      const present = fam.ids.some(id => moduleMap.has(id));
+      if (present) {
+        displayList.push({
+          id: `group_${key}`,
+          name: fam.name,
+          rank: rank,
+          target: 'skill',
+          effect: 'Choose a variant to apply',
+          tag: '',
+          repeating: true,
+          _family: key
+        });
+      }
+    });
+
     optionsContainer.innerHTML = `
       <div class="module-availability">Available: ${availableCount - usedCount}/${availableCount}</div>
       <div class="module-list">
-        ${modules.map(module => {
-          const isSelected = selectedModules.some(m => m.id === module.id);
-          const canSelect = !isSelected && (usedCount < availableCount);
+        ${displayList.map(module => {
+          const isGroup = !!module._family;
+          const isSelected = !isGroup && selectedModules.some(m => m.id === module.id);
+          const canSelect = (isGroup || !isSelected) && (usedCount < availableCount);
 
           return `
             <div class="module-option ${isSelected ? 'selected' : ''} ${canSelect ? '' : 'disabled'}"
-                 data-module-id="${module.id}" data-rank="${rank}">
-              <div class="module-name">${module.name}</div>
+                 data-module-id="${module.id}" data-rank="${rank}" ${isGroup ? `data-group="${module._family}"` : ''}>
+              <div class="module-name">${module.name}${isGroup ? ' (Choose Variant)' : ''}</div>
               <div class="module-effect">${module.effect}</div>
               <div class="module-meta">
                 ${module.tag ? `<span class="module-tag">${module.tag}</span>` : ''}
@@ -3872,9 +4201,18 @@ export class CharacterSheet {
 
     // Add click handlers for module selection
     document.querySelectorAll('.module-option').forEach(option => {
-      option.addEventListener('click', () => {
+      option.addEventListener('click', async () => {
         const moduleId = option.dataset.moduleId;
         const moduleRank = parseInt(option.dataset.rank);
+        const group = option.dataset.group || null;
+
+        if (group && !option.classList.contains('disabled')) {
+          const selectedVariant = await this.showGroupedModuleSelectionDialog(group);
+          if (!selectedVariant) return;
+          // Directly add the chosen real module id
+          await this.addModuleToSkill(selectedVariant, moduleRank, false);
+          return;
+        }
 
         if (option.classList.contains('selected')) {
           // Remove module
@@ -3912,35 +4250,37 @@ export class CharacterSheet {
     container.innerHTML = modulesHtml;
   }
 
-  // Show target die selection dialog
-  async showTargetDieSelectionDialog(availableDice, moduleName) {
+  // Show multi-target die selection dialog
+  async showMultiTargetDieSelectionDialog(availableDice, moduleName, count, disabledIds = [], tagLabel = null) {
     return new Promise((resolve) => {
       const dialogHtml = `
-        <div class="modal-overlay" id="target-die-modal">
+        <div class="modal-overlay" id="multi-target-die-modal">
           <div class="modal-content target-die-content">
             <div class="modal-header">
-              <h3>Select Target Die</h3>
-              <button class="modal-close" onclick="window.closeTargetDieModal(null)">×</button>
+              <h3>Select ${count} Dice</h3>
+              <button class="modal-close">×</button>
             </div>
             <div class="modal-body">
-              <p>The module <strong>${moduleName}</strong> requires a target die. Please select which die to apply this effect to:</p>
+              <p>The module <strong>${moduleName}</strong> requires selecting ${count} dice. ${tagLabel ? `Dice already with ${tagLabel} are disabled.` : ''}</p>
               <div class="target-dice-list">
-                ${availableDice.map((die, index) => `
-                  <div class="target-die-option" data-die-id="${die.id}">
+                ${availableDice.map((die) => {
+                  const disabled = disabledIds.includes(die.id);
+                  return `
+                  <label class="target-die-option ${disabled ? 'disabled' : ''}" data-die-id="${die.id}">
+                    <input type="checkbox" class="select-die-checkbox" data-die-id="${die.id}" ${disabled ? 'disabled' : ''} />
                     <div class="die-info">
                       <span class="die-tag">${die.tag}</span>
                       <span class="die-notation">${die.notation}</span>
                       <span class="die-type">(${die.type})</span>
+                      ${disabled && tagLabel ? `<span class="die-disabled-reason">Already has ${tagLabel}</span>` : ''}
                     </div>
-                    <button class="btn-primary select-die-btn" data-die-id="${die.id}">
-                      SELECT
-                    </button>
-                  </div>
-                `).join('')}
+                  </label>`;
+                }).join('')}
               </div>
             </div>
             <div class="modal-footer">
-              <button class="btn-secondary" onclick="window.closeTargetDieModal(null)">Cancel</button>
+              <button class="btn-primary" id="confirm-multi-select">Confirm</button>
+              <button class="btn-secondary">Cancel</button>
             </div>
           </div>
         </div>
@@ -3948,20 +4288,231 @@ export class CharacterSheet {
 
       document.body.insertAdjacentHTML('beforeend', dialogHtml);
 
-      // Event listeners for die selection
-      document.querySelectorAll('.select-die-btn').forEach(btn => {
+      const modalEl = document.getElementById('multi-target-die-modal');
+      const closeBtn = modalEl.querySelector('.modal-close');
+      const cancelBtn = modalEl.querySelector('.btn-secondary');
+      const confirmBtn = document.getElementById('confirm-multi-select');
+
+      const closeModal = (selectedIds) => {
+        const el = document.getElementById('multi-target-die-modal');
+        if (el) el.remove();
+        resolve(selectedIds);
+      };
+
+      closeBtn.addEventListener('click', () => closeModal(null));
+      cancelBtn.addEventListener('click', () => closeModal(null));
+
+      confirmBtn.addEventListener('click', () => {
+        const checked = Array.from(document.querySelectorAll('.select-die-checkbox:checked')).map(el => el.dataset.dieId);
+        if (checked.length === count) {
+          closeModal(checked);
+        }
+      });
+    });
+  }
+
+  // Dialog to choose variant for grouped families (burning/tremoring/bleeding/fast/unstable)
+  async showGroupedModuleSelectionDialog(family) {
+    const familyOptions = {
+      burning: [
+        { id: 'burning_die_hit', label: 'One Die — [Hit] Inflict {Cost+1} Burn' },
+        { id: 'burning_die_clashwin', label: 'One Die — [Clash Win] Inflict {Cost+1} Burn' },
+        { id: 'burning_all_hit', label: 'All Dice — [Hit] Inflict 1 Burn' },
+        { id: 'burning_all_clashwin', label: 'All Dice — [Clash Win] Inflict 1 Burn' }
+      ],
+      tremoring: [
+        { id: 'tremoring_die_hit', label: 'One Die — [Hit] Inflict {Cost} Tremor' },
+        { id: 'tremoring_die_clashwin', label: 'One Die — [Clash Win] Inflict {Cost} Tremor' },
+        { id: 'tremoring_all_hit', label: 'All Dice — [Hit] Inflict 1 Tremor' },
+        { id: 'tremoring_all_clashwin', label: 'All Dice — [Clash Win] Inflict 1 Tremor' }
+      ],
+      bleeding: [
+        { id: 'bleeding_die_hit', label: 'One Die — [Hit] Inflict {Cost} Bleed' },
+        { id: 'bleeding_die_clashwin', label: 'One Die — [Clash Win] Inflict {Cost} Bleed' },
+        { id: 'bleeding_all_hit', label: 'All Dice — [Hit] Inflict 1 Bleed' },
+        { id: 'bleeding_all_clashwin', label: 'All Dice — [Clash Win] Inflict 1 Bleed' }
+      ],
+      sinking: [
+        { id: 'sinking_die_hit', label: 'One Die — [Hit] Inflict {Cost+1} Sinking' },
+        { id: 'sinking_die_clashwin', label: 'One Die — [Clash Win] Inflict {Cost+1} Sinking' },
+        { id: 'sinking_all_hit', label: 'All Dice — [Hit] Inflict 1 Sinking' },
+        { id: 'sinking_all_clashwin', label: 'All Dice — [Clash Win] Inflict 1 Sinking' }
+      ],
+      blazing: [
+        { id: 'blazing_die_hit', label: 'One Die — [Hit] Trigger Blaze on target' },
+        { id: 'blazing_die_clashwin', label: 'One Die — [Clash Win] Trigger Blaze on target' }
+      ],
+      fast: [
+        { id: 'fast_on_use', label: '[On Use] Gain 1 Haste (2 if Cost ≥ 3)' },
+        { id: 'fast_after_use', label: '[After Use] Gain 1 Haste (2 if Cost ≥ 3)' }
+      ],
+      unstable: [
+        { id: 'unstable_burst_hit', label: 'One Die — [Hit] Trigger Tremor Burst, then reduce target’s Tremor by 4' },
+        { id: 'unstable_burst_clashwin', label: 'One non-evade Die — [Clash Win] Trigger Tremor Burst, then reduce target’s Tremor by 4' }
+      ]
+    };
+
+    const options = familyOptions[family] || [];
+    if (options.length === 0) return null;
+
+    return new Promise((resolve) => {
+      const dialogHtml = `
+        <div class="modal-overlay" id="grouped-module-modal">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h3>Select Variant — ${family.charAt(0).toUpperCase() + family.slice(1)}</h3>
+              <button class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+              <div class="options-list">
+                ${options.map(opt => `
+                  <div class="option-item">
+                    <div class="option-description">${opt.label}</div>
+                    <button class="btn-primary select-grouped-option-btn" data-option-id="${opt.id}">SELECT</button>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn-secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.insertAdjacentHTML('beforeend', dialogHtml);
+
+      const modalEl = document.getElementById('grouped-module-modal');
+      const closeBtn = modalEl.querySelector('.modal-close');
+      const cancelBtn = modalEl.querySelector('.btn-secondary');
+
+      const closeModal = (selectedId) => {
+        const el = document.getElementById('grouped-module-modal');
+        if (el) el.remove();
+        resolve(selectedId);
+      };
+
+      closeBtn.addEventListener('click', () => closeModal(null));
+      cancelBtn.addEventListener('click', () => closeModal(null));
+
+      modalEl.querySelectorAll('.select-grouped-option-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-          const dieId = btn.dataset.dieId;
-          window.closeTargetDieModal(dieId);
+          const id = btn.dataset.optionId;
+          closeModal(id);
         });
       });
+    });
+  }
 
-      // Close modal handler
-      window.closeTargetDieModal = (selectedDieId) => {
-        document.getElementById('target-die-modal').remove();
-        delete window.closeTargetDieModal;
+  // Show option selection dialog for modules with choices
+  async showModuleOptionSelectionDialog(module) {
+    return new Promise((resolve) => {
+      const dialogHtml = `
+        <div class="modal-overlay" id="module-option-modal">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h3>Select an Option — ${module.name}</h3>
+              <button class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+              <div class="options-list">
+                ${module.options.map(opt => `
+                  <div class="option-item">
+                    <div class="option-description">${opt.description}</div>
+                    <button class="btn-primary select-option-btn" data-option-id="${opt.id}">SELECT</button>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn-secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.insertAdjacentHTML('beforeend', dialogHtml);
+
+      const modalEl = document.getElementById('module-option-modal');
+      const closeBtn = modalEl.querySelector('.modal-close');
+      const cancelBtn = modalEl.querySelector('.btn-secondary');
+
+      const closeModal = (selectedId) => {
+        const el = document.getElementById('module-option-modal');
+        if (el) el.remove();
+        resolve(selectedId);
+      };
+
+      closeBtn.addEventListener('click', () => closeModal(null));
+      cancelBtn.addEventListener('click', () => closeModal(null));
+
+      modalEl.querySelectorAll('.select-option-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.optionId;
+          closeModal(id);
+        });
+      });
+    });
+  }
+
+  // Show target die selection dialog
+  async showTargetDieSelectionDialog(availableDice, moduleName, disabledIds = [], tagLabel = null) {
+    return new Promise((resolve) => {
+      const dialogHtml = `
+        <div class="modal-overlay" id="target-die-modal">
+          <div class="modal-content target-die-content">
+            <div class="modal-header">
+              <h3>Select Target Die</h3>
+              <button class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+              <p>The module <strong>${moduleName}</strong> requires a target die. ${tagLabel ? `Dice already with ${tagLabel} are disabled.` : ''}</p>
+              <div class="target-dice-list">
+                ${availableDice.map((die) => {
+                  const disabled = disabledIds.includes(die.id);
+                  return `
+                  <div class="target-die-option ${disabled ? 'disabled' : ''}" data-die-id="${die.id}">
+                    <div class="die-info">
+                      <span class="die-tag">${die.tag}</span>
+                      <span class="die-notation">${die.notation}</span>
+                      <span class="die-type">(${die.type})</span>
+                      ${disabled && tagLabel ? `<span class="die-disabled-reason">Already has ${tagLabel}</span>` : ''}
+                    </div>
+                    <button class="btn-primary select-die-btn" data-die-id="${die.id}" ${disabled ? 'disabled' : ''}>
+                      SELECT
+                    </button>
+                  </div>`;
+                }).join('')}
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn-secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.body.insertAdjacentHTML('beforeend', dialogHtml);
+
+      const modalEl = document.getElementById('target-die-modal');
+      const closeBtn = modalEl.querySelector('.modal-close');
+      const cancelBtn = modalEl.querySelector('.btn-secondary');
+
+      const closeModal = (selectedDieId) => {
+        const el = document.getElementById('target-die-modal');
+        if (el) el.remove();
         resolve(selectedDieId);
       };
+
+      closeBtn.addEventListener('click', () => closeModal(null));
+      cancelBtn.addEventListener('click', () => closeModal(null));
+
+      // Event listeners for die selection
+      modalEl.querySelectorAll('.select-die-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (btn.disabled) return;
+          const dieId = btn.dataset.dieId;
+          closeModal(dieId);
+        });
+      });
     });
   }
 

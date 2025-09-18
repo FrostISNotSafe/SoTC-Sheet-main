@@ -228,8 +228,8 @@ export class SkillCreator {
     return { success: true };
   }
 
-  // Add a module to the skill
-  addModule(moduleId, moduleRank, targetDieId = null, isSpare = false) {
+  // Add a module to the skill (supports option-based and multi-die modules)
+  addModule(moduleId, moduleRank, targetDieId = null, isSpare = false, option = null) {
     const module = skillModulesManager.getModuleById(moduleId, moduleRank);
     if (!module) return { success: false, error: 'Module not found' };
 
@@ -239,10 +239,13 @@ export class SkillCreator {
       if (used >= available) return { success: false, error: `Not enough spare Rank ${moduleRank} modules` };
     }
 
-    if (module.target === 'die' && !targetDieId) {
+    // Allow passing multiple target dice via option.targetDieIds
+    const targetDieIds = Array.isArray(option?.targetDieIds) ? option.targetDieIds : (targetDieId ? [targetDieId] : []);
+
+    if (module.target === 'die' && targetDieIds.length === 0) {
       const availableDice = this.getAvailableTargetDice(module);
       if (availableDice.length === 1) {
-        targetDieId = availableDice[0].id;
+        targetDieIds.push(availableDice[0].id);
       } else if (availableDice.length === 0) {
         return { success: false, error: 'No suitable dice available for this module' };
       } else {
@@ -250,7 +253,7 @@ export class SkillCreator {
       }
     }
 
-    const validation = this.validateModuleAddition(module, targetDieId);
+    const validation = this.validateModuleAddition(module, targetDieIds);
     if (!validation.valid) return { success: false, error: validation.error };
 
     const skillModule = {
@@ -260,9 +263,11 @@ export class SkillCreator {
       effect: module.effect,
       tag: module.tag,
       target: module.target,
-      targetDieId: targetDieId,
+      targetDieId: targetDieIds[0] || null,
+      targetDieIds: targetDieIds.length > 1 ? targetDieIds : null,
       isSpare: isSpare,
-      description: module.description
+      description: module.description,
+      selectedOptionId: option?.optionId || null
     };
 
     this.currentSkill.modules.push(skillModule);
@@ -289,21 +294,63 @@ export class SkillCreator {
         return true;
       }
 
-      return die.type === 'offensive';
+      // Critical Fragility/Bind cannot be added to dice that already inflict those statuses
+      if (module.id === 'critical_fragility') {
+        return die.type === 'offensive' && !((die.effects || []).some(e => /Fragile/i.test(e.effect || '')));
+      }
+      if (module.id === 'critical_bind') {
+        return die.type === 'offensive' && !((die.effects || []).some(e => /Bind/i.test(e.effect || '')));
+      }
+
+      // Flame Step / Futility / Quick Step only apply to Evade dice
+      if (module.id === 'flame_step' || module.id === 'futility' || module.id === 'quick_step') {
+        return die.tag === '[Evade]';
+      }
+
+      // Heroic only applies to Block dice
+      if (module.id === 'heroic') {
+        return die.tag === '[Block]';
+      }
+
+      return die.type === 'offensive' || die.type === 'defensive';
     });
   }
 
   // Validate if a module can be added
-  validateModuleAddition(module, targetDieId = null) {
-    if (module.tag) {
-      const hasTag = this.currentSkill.modules.some(m => m.tag === module.tag);
-      if (hasTag) return { valid: false, error: `Tag ${module.tag} already present` };
+  validateModuleAddition(module, target) {
+    // Cost restriction for Kinetic Absorption / Frightening
+    if (module.id === 'kinetic_absorption' && (this.currentSkill?.cost ?? 0) < 2) {
+      return { valid: false, error: 'Kinetic Absorption requires skill cost of 2 or higher' };
+    }
+    if (module.id === 'frightening' && (this.currentSkill?.cost ?? 0) < 2) {
+      return { valid: false, error: 'Frightening requires skill cost of 2 or higher' };
+    }
+    if (module.id === 'limited_strength') {
+      const hasLimit = (this.currentSkill.tags || []).includes('[Limit X Uses]') || (this.currentSkill.effects || []).some(e => e.tag === '[Limit X Uses]');
+      if (!hasLimit) return { valid: false, error: 'Limited Strength requires the skill to have a [Limit]' };
+    }
 
-      if (targetDieId) {
-        const die = this.currentSkill.dice.find(d => d.id === targetDieId);
-        if (die && die.effects.some(e => e.tag === module.tag)) {
-          return { valid: false, error: `Die already has tag ${module.tag}` };
+    if (module.tag) {
+      // Only block duplicates on the same die; allow across different dice
+      const targetIds = Array.isArray(target) ? target : (target ? [target] : []);
+      if (targetIds.length > 0) {
+        for (const id of targetIds) {
+          const die = this.currentSkill.dice.find(d => d.id === id);
+          if (!die) return { valid: false, error: 'Target die not found' };
+          if (die.effects.some(e => e.tag === module.tag)) {
+            return { valid: false, error: `Die already has tag ${module.tag}` };
+          }
+          if ((module.id === 'flame_step' || module.id === 'futility' || module.id === 'quick_step') && die.tag !== '[Evade]') {
+            return { valid: false, error: 'This module can only be applied to Evade dice' };
+          }
+          if (module.id === 'heroic' && die.tag !== '[Block]') {
+            return { valid: false, error: 'This module can only be applied to Block dice' };
+          }
         }
+      } else {
+        // For skill-level tags, prevent duplicates at the skill level
+        const hasSkillTag = (this.currentSkill.effects || []).some(e => e.tag === module.tag);
+        if (hasSkillTag) return { valid: false, error: `Tag ${module.tag} already present` };
       }
     }
 
@@ -312,13 +359,8 @@ export class SkillCreator {
       if (hasModule) return { valid: false, error: 'Module already present and not repeating' };
     }
 
-    if (module.target === 'die' && !targetDieId) {
+    if (module.target === 'die' && (Array.isArray(target) ? target.length === 0 : !target)) {
       return { valid: false, error: 'This module requires a target die' };
-    }
-
-    if (module.target === 'die' && targetDieId) {
-      const die = this.currentSkill.dice.find(d => d.id === targetDieId);
-      if (!die) return { valid: false, error: 'Target die not found' };
     }
 
     return { valid: true };
@@ -328,9 +370,74 @@ export class SkillCreator {
   applyModuleEffects(skillModule) {
     const module = skillModulesManager.getModuleById(skillModule.id, skillModule.rank);
 
-    if (module.target === 'die' && skillModule.targetDieId) {
-      const die = this.currentSkill.dice.find(d => d.id === skillModule.targetDieId);
-      if (die) {
+    const normalizeTaggedText = (tag, raw) => {
+      let txt = this.processEffectText(raw || '');
+      txt = txt.replace(/^\s*This\s+skill\s+gains:?\s*/i, '');
+      const tagName = String(tag || '').replace(/\[|\]/g, '').replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`);
+      const tagRe = new RegExp(`^\s*\[${tagName}\]\s*:?[\s\"]*`, 'i');
+      txt = txt.replace(tagRe, '').replace(/^"|"$/g, '').trim();
+      return txt;
+    };
+
+    if (module.id === 'comeback') {
+      const chosen = skillModule.selectedOptionId || (module.options && module.options[0]?.id) || null;
+      const option = (module.options || []).find(o => o.id === chosen) || module.options?.[0];
+      if (option) {
+        // Only add effects on dice; do not add a top-level skill effect
+        if (option.selection?.type === 'die') {
+          const ids = skillModule.targetDieIds && skillModule.targetDieIds.length ? skillModule.targetDieIds : (skillModule.targetDieId ? [skillModule.targetDieId] : []);
+          ids.forEach(id => {
+            const die = this.currentSkill.dice.find(d => d.id === id);
+            if (die) die.effects.push({ tag: module.tag, effect: 'Boost the power of the final Die by 2.', source: module.name });
+          });
+        } else if (option.selection?.type === 'dice_group' && option.selection.group === 'non_final') {
+          const nonFinal = this.currentSkill.dice.slice(0, Math.max(0, this.currentSkill.dice.length - 1));
+          nonFinal.forEach(die => die.effects.push({ tag: module.tag, effect: 'Boost the power of the final Die by 1.', source: module.name }));
+        }
+      }
+      this.updateSkillDescription();
+      return;
+    }
+
+    if (module.id === 'counterplay') {
+      const chosen = skillModule.selectedOptionId || '';
+      const map = {
+        'counterplay_slash': 'Slash',
+        'counterplay_pierce': 'Pierce',
+        'counterplay_blunt': 'Blunt',
+        'counterplay_block': 'Block',
+        'counterplay_evade': 'Evade'
+      };
+      const chosenType = map[chosen] || 'Slash';
+      const ids = skillModule.targetDieIds && skillModule.targetDieIds.length ? skillModule.targetDieIds : (skillModule.targetDieId ? [skillModule.targetDieId] : []);
+      ids.forEach(id => {
+        const die = this.currentSkill.dice.find(d => d.id === id);
+        if (die) die.effects.push({ tag: module.tag, effect: `When clashing against a ${chosenType} Die, gain {Cost+1} power.`, source: module.name });
+      });
+      this.updateSkillDescription();
+      return;
+    }
+
+    if (module.id === 'limited_strength') {
+      const ids = skillModule.targetDieIds && skillModule.targetDieIds.length ? skillModule.targetDieIds : (skillModule.targetDieId ? [skillModule.targetDieId] : []);
+      const isDouble = skillModule.selectedOptionId === 'limited_strength_double';
+      ids.forEach(id => {
+        const die = this.currentSkill.dice.find(d => d.id === id);
+        if (!die) return;
+        const inc = isDouble ? 1 : 2;
+        die.bonus += inc;
+        die.notation = this.updateDieNotation(die);
+        die.effects.push({ tag: '[Power]', effect: `+${inc} Power from Limited Strength`, source: module.name });
+      });
+      this.updateSkillDescription();
+      return;
+    }
+
+    if (module.target === 'die' && (skillModule.targetDieId || (skillModule.targetDieIds && skillModule.targetDieIds.length))) {
+      const ids = skillModule.targetDieIds && skillModule.targetDieIds.length ? skillModule.targetDieIds : [skillModule.targetDieId];
+      ids.forEach(targetId => {
+        const die = this.currentSkill.dice.find(d => d.id === targetId);
+        if (!die) return;
         if (module.id.includes('stronger') || module.id.includes('power_up')) {
           const powerIncrease = parseInt(module.effect.match(/\+(\d+)/)[1]);
           die.bonus += powerIncrease;
@@ -352,25 +459,43 @@ export class SkillCreator {
         }
 
         if (module.tag) {
-          die.effects.push({ tag: module.tag, effect: this.processEffectText(module.effect), source: module.name });
+          if (module.id === 'critical_fragility' || module.id === 'critical_bind') {
+            const isD10Plus = die.dieSize === 'd10' || die.dieSize === 'd12';
+            const amount = isD10Plus ? 2 : 1;
+            const status = module.id === 'critical_fragility' ? 'Fragile' : 'Bind';
+            const rendered = `Inflict ${amount} ${status}`;
+            const exists = die.effects.some(e => e.tag === module.tag && this.processEffectText(e.effect || '') === rendered);
+            if (!exists) die.effects.push({ tag: module.tag, effect: rendered, source: module.name });
+          } else {
+            const clean = normalizeTaggedText(module.tag, module.effect);
+            const exists = die.effects.some(e => e.tag === module.tag && this.processEffectText(e.effect || '') === clean);
+            if (!exists) die.effects.push({ tag: module.tag, effect: clean, source: module.name });
+          }
         }
 
         if (module.id === 'burning') {
-          die.effects.push({ tag: '[Hit]', effect: this.processEffectText(module.effect), source: module.name });
+          // Ensure we don't duplicate the [Hit] tag if it's present in module.effect
+          const clean = normalizeTaggedText('[Hit]', module.effect);
+          const exists = die.effects.some(e => e.tag === '[Hit]' && this.processEffectText(e.effect || '') === clean);
+          if (!exists) die.effects.push({ tag: '[Hit]', effect: clean, source: module.name });
         }
 
         if (['slash', 'pierce', 'blunt'].includes(module.id)) {
           die.tag = `[${module.name}]`;
         }
-      }
+      });
     } else {
       const availableDie = this.currentSkill.dice.find(d => !d.effects.some(e => e.source === module.name));
       if (availableDie && module.target === 'die') {
         skillModule.targetDieId = availableDie.id;
         return this.applyModuleEffects(skillModule);
       } else if (module.target === 'skill') {
-        this.currentSkill.effects.push({ tag: module.tag, effect: this.processEffectText(module.effect), source: module.name });
-        if (module.tag) this.currentSkill.tags.push(module.tag);
+        const clean = normalizeTaggedText(module.tag, module.effect);
+        const existsSkill = this.currentSkill.effects.some(e => e.tag === module.tag && this.processEffectText(e.effect || '') === clean);
+        if (!existsSkill) {
+          this.currentSkill.effects.push({ tag: module.tag, effect: clean, source: module.name });
+        }
+        if (module.tag && !this.currentSkill.tags.includes(module.tag)) this.currentSkill.tags.push(module.tag);
       }
     }
 
@@ -406,10 +531,22 @@ export class SkillCreator {
       })) : [])
     ].filter(e => e && e.tag);
 
+    // Helper to render an effect ensuring the tag isn't duplicated in the effect text
+    const renderEffectForDisplay = (e) => {
+      const raw = typeof e.effect === 'string' ? e.effect : (e.effect || '');
+      let eff = this.processEffectText(raw);
+      const tag = e.tag || '';
+      if (tag) {
+        const tagEsc = tag.replace(/[[\]]/g, '\\$&');
+        eff = eff.replace(new RegExp(`^\\s*${tagEsc}\\s*:?\\s*`, 'i'), '').trim();
+      }
+      return `${tag} ${eff}`.trim();
+    };
+
     if (skillEffects.length > 0) {
       skillEffects.forEach(effect => {
         if (typeof effect === 'string') description += `${effect}\n`;
-        else description += `${effect.tag} ${effect.effect || ''}\n`;
+        else description += `${renderEffectForDisplay(effect)}\n`;
       });
       description += '\n';
     }
@@ -417,16 +554,29 @@ export class SkillCreator {
     this.currentSkill.dice.forEach((die, index) => {
       let dieDesc = `${die.tag} ${die.notation}`;
       const baseDie = isUnique && base.dice && base.dice[index];
-      const dieEffects = [
+      // Merge die effects with base die effects and deduplicate by rendered text
+      const rawDieEffects = [
         ...(die.effects || []),
         ...(baseDie && baseDie.effects ? baseDie.effects.map(effect => ({
           tag: effect.split(' ')[0],
-          effect: effect.split(' ').slice(1).join(' ')
+          effect: effect.split(' ').slice(1).join(' '),
+          source: 'base'
         })) : [])
       ].filter(e => e && e.tag && e.tag !== die.tag);
 
-      if (dieEffects.length > 0) {
-        dieDesc += ' ' + dieEffects.map(e => `${e.tag} ${typeof e.effect === 'string' ? e.effect : (e.effect || '')}`).join(' ');
+      // Deduplicate by the final rendered string to avoid repeating same tag+text
+      const seen = new Set();
+      const deduped = [];
+      rawDieEffects.forEach(e => {
+        const rendered = renderEffectForDisplay(e);
+        if (!seen.has(rendered)) {
+          seen.add(rendered);
+          deduped.push(e);
+        }
+      });
+
+      if (deduped.length > 0) {
+        dieDesc += ' ' + deduped.map(e => renderEffectForDisplay(e)).join(' ');
       }
 
       description += dieDesc + '\n';

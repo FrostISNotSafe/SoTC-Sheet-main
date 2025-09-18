@@ -1,212 +1,177 @@
-/**
- * Stars of the City - Base E.G.O. Creator Component
- * Handles the creation of Base E.G.O. at Level 2 following specific rules
- */
-
 import { skillBasesManager } from '../skillBases.js';
 import { skillModulesManager } from '../skillModules.js';
 import { baseEgoPassiveManager } from '../baseEgoPassives.js';
+import { SkillCreator } from '../skillCreator.js';
 
+// New Base E.G.O. creator component redesigned to follow Skill Creator UX
 export class BaseEGOCreator {
   constructor(character, onSave, onCancel) {
     this.character = character;
     this.onSave = onSave;
     this.onCancel = onCancel;
-    this.currentStep = 'selectBase';
+
+    this.currentStep = 'selectBase'; // selectBase, configureDice, addModules, chooseBenefit, selectPassive, finalize
+
     this.baseEgo = {
       name: '',
       baseId: '',
       baseName: '',
       cost: 0,
       dice: [],
-      modules: {
-        rank1: [],
-        rank2: [],
-        rank3: []
-      },
-      powerBenefit: '', // 'dice_power' or 'cost_bonus'
+      modules: { rank1: [], rank2: [], rank3: [] },
+      powerBenefit: '',
       passiveId: '',
       passiveChoice: '',
       emotionCost: 6,
       rating: 'ZAYIN'
     };
+
     this.availableBases = [];
     this.availableModules = { rank1: [], rank2: [], rank3: [] };
     this.availablePassives = [];
+
     this.init();
   }
 
-  // Initialize the creator
   init() {
-    // Get bases with cost 2 or higher for E.G.O.
+    // load bases and modules
     this.availableBases = skillBasesManager.getEgoBases();
-    
-    // Get available modules (excluding those with [Limit] tag)
-    this.availableModules.rank1 = skillModulesManager.getModulesByRank(1)
-      .filter(module => !module.tags || !module.tags.includes('[Limit]'));
-    this.availableModules.rank2 = skillModulesManager.getModulesByRank(2)
-      .filter(module => !module.tags || !module.tags.includes('[Limit]'));
-    this.availableModules.rank3 = skillModulesManager.getModulesByRank(3)
-      .filter(module => !module.tags || !module.tags.includes('[Limit]'));
-    
-    // Get available Base E.G.O. passives
+    this.availableModules.rank1 = skillModulesManager.getModulesByRank(1).filter(m => !m.tags || !m.tags.includes('[Limit]'));
+    this.availableModules.rank2 = skillModulesManager.getModulesByRank(2).filter(m => !m.tags || !m.tags.includes('[Limit]'));
+    this.availableModules.rank3 = skillModulesManager.getModulesByRank(3).filter(m => !m.tags || !m.tags.includes('[Limit]'));
     this.availablePassives = baseEgoPassiveManager.getAllPassives();
   }
 
-  // Render the creator interface
+  // Helper to copy base dice into the ego structure
+  applyBase(baseId) {
+    const base = skillBasesManager.getBaseById(baseId);
+    if (!base) return false;
+    this.baseEgo.baseId = base.id;
+    this.baseEgo.baseName = base.name;
+    this.baseEgo.cost = base.cost;
+    this.baseEgo.dice = base.dice.map((d, i) => ({ id: `d${i}`, originalTag: d.tag, tag: d.tag, notation: d.notation, dieSize: d.dieSize, bonus: d.bonus || 0, chosenType: null }));
+    return true;
+  }
+
   render() {
     return `
-      <div class="base-ego-creator">
-        <div class="creator-header">
-          <h2>Create Base E.G.O.</h2>
-          <p>At Level 2, you must create your Base E.G.O. representing a budding seed of Light.</p>
-        </div>
-
-        <div class="creator-steps">
+      <div class="base-ego-creator skill-creation-content">
+        <div class="modal-header"><h3>Create Base E.G.O.</h3></div>
+        <div class="modal-body">
           ${this.renderStepIndicator()}
-          ${this.renderCurrentStep()}
+          <div class="step-panel">${this.renderCurrentStep()}</div>
         </div>
-
-        <div class="creator-actions">
-          ${this.renderNavigationButtons()}
+        <div class="modal-footer">
+          <button class="btn-secondary" id="cancel-ego-btn">Cancel</button>
+          ${this.currentStep === 'finalize' ? `<button class="btn-primary" id="create-ego-btn">Create E.G.O.</button>` : `<button class="btn-primary" id="next-step-btn">Next</button>`}
         </div>
       </div>
     `;
   }
 
-  // Render step indicator
   renderStepIndicator() {
     const steps = [
-      { id: 'selectBase', name: 'Select Base', completed: this.baseEgo.baseId !== '' },
-      { id: 'addModules', name: 'Add Modules', completed: this.isModulesComplete() },
-      { id: 'chooseBenefit', name: 'Choose Benefit', completed: this.baseEgo.powerBenefit !== '' },
-      { id: 'selectPassive', name: 'Select Passive', completed: this.baseEgo.passiveId !== '' },
-      { id: 'finalize', name: 'Finalize', completed: false }
+      { id: 'selectBase', name: 'Base' },
+      { id: 'configureDice', name: 'Dice' },
+      { id: 'addModules', name: 'Modules' },
+      { id: 'chooseBenefit', name: 'Benefit' },
+      { id: 'selectPassive', name: 'Passive' },
+      { id: 'finalize', name: 'Finalize' }
     ];
 
     return `
       <div class="step-indicator">
-        ${steps.map((step, index) => `
-          <div class="step ${this.currentStep === step.id ? 'active' : ''} ${step.completed ? 'completed' : ''}">
-            <div class="step-number">${index + 1}</div>
-            <div class="step-name">${step.name}</div>
+        ${steps.map(s => `
+          <div class="step ${this.currentStep === s.id ? 'active' : ''}" data-step="${s.id}">
+            <div class="step-number">${steps.indexOf(s) + 1}</div>
+            <div class="step-name">${s.name}</div>
           </div>
         `).join('')}
       </div>
     `;
   }
 
-  // Render current step content
   renderCurrentStep() {
     switch (this.currentStep) {
-      case 'selectBase':
-        return this.renderBaseSelection();
-      case 'addModules':
-        return this.renderModuleSelection();
-      case 'chooseBenefit':
-        return this.renderBenefitSelection();
-      case 'selectPassive':
-        return this.renderPassiveSelection();
-      case 'finalize':
-        return this.renderFinalization();
-      default:
-        return '<div>Unknown step</div>';
+      case 'selectBase': return this.renderBaseSelection();
+      case 'configureDice': return this.renderDiceConfiguration();
+      case 'addModules': return this.renderModuleSelection();
+      case 'chooseBenefit': return this.renderBenefitSelection();
+      case 'selectPassive': return this.renderPassiveSelection();
+      case 'finalize': return this.renderFinalization();
+      default: return '<div>Unknown step</div>';
     }
   }
 
-  // Render base selection step
   renderBaseSelection() {
     return `
-      <div class="step-content">
-        <h3>Step 1: Choose a Base for the Skill</h3>
-        <p>The base must have a Cost of 2 or higher.</p>
-        
-        <div class="base-grid">
-          ${this.availableBases.map(base => `
-            <div class="base-card ${this.baseEgo.baseId === base.id ? 'selected' : ''}" 
-                 data-base-id="${base.id}">
-              <div class="base-header">
-                <h4>${base.name}</h4>
-                <span class="base-cost">Cost: ${base.cost}</span>
-              </div>
-              <div class="base-dice">
-                ${base.dice.map(die => `<span class="die-notation">${die.tag} ${die.notation}</span>`).join('')}
-              </div>
-              <div class="base-description">${base.description}</div>
+      <div class="base-list">
+        ${this.availableBases.map(b => `
+          <div class="base-card ${this.baseEgo.baseId === b.id ? 'selected' : ''}" data-base-id="${b.id}">
+            <div class="base-header"><h4>${b.name}</h4><span class="base-cost">Cost: ${b.cost}</span></div>
+            <div class="base-dice">${b.dice.map(d => `<span class="die-notation">${d.tag} ${d.notation}</span>`).join('')}</div>
+            <div class="base-description">${b.description || ''}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  renderDiceConfiguration() {
+    return `
+      <div class="dice-config">
+        <h4>Configure Dice</h4>
+        <div class="dice-grid">
+          ${this.baseEgo.dice.map(die => `
+            <div class="die-item" data-die-id="${die.id}">
+              <div class="die-tag">${die.tag}</div>
+              <div class="die-notation">${die.notation}</div>
+              ${['[Any Offensive]','[Any Other Offensive]','[Block or Evade]'].includes(die.originalTag) ? `
+                <select class="die-type-select" data-die-id="${die.id}">
+                  <option value="">Select</option>
+                  ${die.originalTag === '[Block or Evade]' ? `
+                    <option value="Block" ${die.chosenType==='Block'?'selected':''}>Block</option>
+                    <option value="Evade" ${die.chosenType==='Evade'?'selected':''}>Evade</option>
+                  ` : `
+                    <option value="Slash" ${die.chosenType==='Slash'?'selected':''}>Slash</option>
+                    <option value="Pierce" ${die.chosenType==='Pierce'?'selected':''}>Pierce</option>
+                    <option value="Blunt" ${die.chosenType==='Blunt'?'selected':''}>Blunt</option>
+                  `}
+                </select>
+              ` : ''}
             </div>
           `).join('')}
         </div>
-
-        ${this.baseEgo.baseId ? `
-          <div class="selected-base-preview">
-            <h4>Selected Base: ${this.baseEgo.baseName}</h4>
-            <p>Cost: ${this.baseEgo.cost}</p>
-            <p>Dice: ${this.baseEgo.dice.length} dice</p>
-          </div>
-        ` : ''}
       </div>
     `;
   }
 
-  // Render module selection step
-  renderModuleSelection() {
-    return `
-      <div class="step-content">
-        <h3>Step 2: Add Skill Modules</h3>
-        <p>Add exactly: <strong>3 Rank 1</strong>, <strong>1 Rank 2</strong>, and <strong>1 Rank 3</strong> modules.</p>
-        <p><em>You cannot add Spare Modules to this E.G.O, and it cannot be modified mid-mission.</em></p>
-
-        <div class="module-requirements">
-          <div class="requirement-item">
-            <span>Rank 1 Modules:</span>
-            <span class="count">${this.baseEgo.modules.rank1.length}/3</span>
-          </div>
-          <div class="requirement-item">
-            <span>Rank 2 Modules:</span>
-            <span class="count">${this.baseEgo.modules.rank2.length}/1</span>
-          </div>
-          <div class="requirement-item">
-            <span>Rank 3 Modules:</span>
-            <span class="count">${this.baseEgo.modules.rank3.length}/1</span>
-          </div>
-        </div>
-
-        <div class="module-selection">
-          ${this.renderModuleRankSelection(1)}
-          ${this.renderModuleRankSelection(2)}
-          ${this.renderModuleRankSelection(3)}
-        </div>
-
-        <div class="selected-modules">
-          <h4>Selected Modules</h4>
-          ${this.renderSelectedModules()}
-        </div>
-      </div>
-    `;
-  }
-
-  // Render module rank selection
   renderModuleRankSelection(rank) {
     const currentCount = this.baseEgo.modules[`rank${rank}`].length;
-    const maxCount = rank === 1 ? 3 : 1;
-    const canAddMore = currentCount < maxCount;
+    const max = rank === 1 ? 3 : 1;
+    // Cross-disable: if a higher rank is full, disable lower ranks (example: rank3 full -> disable rank1/2)
+    const rankMax = {1:3, 2:1, 3:1};
+    const higherFull = (rankToCheck) => {
+      for (let r = rankToCheck+1; r <= 3; r++) {
+        if ((this.baseEgo.modules[`rank${r}`] || []).length >= rankMax[r]) return true;
+      }
+      return false;
+    };
+
+    const crossDisabled = higherFull(rank);
 
     return `
-      <div class="module-rank-section">
-        <h4>Rank ${rank} Modules (${currentCount}/${maxCount})</h4>
-        <div class="module-grid ${!canAddMore ? 'disabled' : ''}">
-          ${this.availableModules[`rank${rank}`].map(module => {
-            const isSelected = this.baseEgo.modules[`rank${rank}`].some(m => m.id === module.id);
-            const canSelect = canAddMore && (!isSelected || module.repeating);
+      <div class="module-rank-section ${crossDisabled ? 'cross-disabled' : ''}">
+        <h5>Rank ${rank} (${currentCount}/${max})</h5>
+        <div class="module-grid ${crossDisabled ? 'disabled' : ''}">
+          ${this.availableModules[`rank${rank}`].map(m => {
+            const isSel = this.baseEgo.modules[`rank${rank}`].some(s => s.id === m.id && (!s.optionId || s.optionId === null));
+            const disabled = !m.repeating && isSel;
             return `
-              <div class="module-card ${!canSelect ? 'disabled' : ''} ${isSelected ? 'selected' : ''}"
-                   data-module-id="${module.id}" data-module-rank="${rank}">
-                <div class="module-header">
-                  <h5>${module.name}</h5>
-                  ${module.repeating ? '<span class="repeating-badge">Repeating</span>' : ''}
-                </div>
-                <div class="module-effect">${module.effect}</div>
-                <div class="module-description">${module.description}</div>
+              <div class="module-card ${disabled ? 'disabled' : ''}" data-module-id="${m.id}" data-module-rank="${rank}">
+                <div class="module-header"><h5>${m.name}</h5>${m.repeating?'<span class="repeating-badge">Repeating</span>':''}</div>
+                <div class="module-effect">${m.effect}</div>
+                <div class="module-description">${m.description || ''}</div>
               </div>
             `;
           }).join('')}
@@ -215,373 +180,259 @@ export class BaseEGOCreator {
     `;
   }
 
-  // Render selected modules
-  renderSelectedModules() {
-    const allSelected = [
-      ...this.baseEgo.modules.rank1.map(m => ({ ...m, rank: 1 })),
-      ...this.baseEgo.modules.rank2.map(m => ({ ...m, rank: 2 })),
-      ...this.baseEgo.modules.rank3.map(m => ({ ...m, rank: 3 }))
-    ];
-
-    if (allSelected.length === 0) {
-      return '<p>No modules selected yet.</p>';
-    }
-
+  renderModuleSelection() {
     return `
-      <div class="selected-modules-list">
-        ${allSelected.map((module, index) => `
-          <div class="selected-module">
-            <span class="module-info">
-              <strong>${module.name}</strong> (Rank ${module.rank}): ${module.effect}
-            </span>
-            <button class="remove-module-btn" data-module-index="${index}" data-module-rank="${module.rank}">×</button>
+      <div class="modules-panel">
+        <h4>Select Modules</h4>
+        ${this.renderModuleRankSelection(1)}
+        ${this.renderModuleRankSelection(2)}
+        ${this.renderModuleRankSelection(3)}
+        <div class="selected-modules">
+          <h5>Selected Modules</h5>
+          ${this.renderSelectedModules()}
+        </div>
+      </div>
+    `;
+  }
+
+  renderSelectedModules() {
+    const all = [
+      ...this.baseEgo.modules.rank1.map(m => ({...m, rank:1})),
+      ...this.baseEgo.modules.rank2.map(m => ({...m, rank:2})),
+      ...this.baseEgo.modules.rank3.map(m => ({...m, rank:3}))
+    ];
+    if (all.length === 0) return '<div class="no-modules">No modules selected</div>';
+    return `
+      <div class="selected-list">
+        ${all.map((m, idx) => `
+          <div class="selected-item">
+            <div>
+              <strong>${m.name}</strong> ${m.optionId ? `— ${m.optionId}` : ''}
+              ${m.targetDieId ? `<div class="module-target">Applied to: ${this.baseEgo.dice.find(d=>d.id===m.targetDieId)?.tag || m.targetDieId} ${this.baseEgo.dice.find(d=>d.id===m.targetDieId)?.notation || ''}</div>` : ''}
+            </div>
+            <div class="effect-preview">${m.effect}</div>
+            <button class="remove-module-btn" data-module-id="${m.id}" data-module-rank="${m.rank}">Remove</button>
           </div>
         `).join('')}
       </div>
     `;
   }
 
-  // Render benefit selection step
   renderBenefitSelection() {
-    const diceCount = this.baseEgo.dice.length;
-    let benefitDescription = '';
-    
-    if (diceCount === 1) {
-      benefitDescription = 'Single Die: +3 Power';
-    } else if (diceCount === 2) {
-      benefitDescription = '2 Dice: +2 Power each';
-    } else if (diceCount >= 3) {
-      benefitDescription = '3+ Dice: +1 Power each';
-    }
-
     return `
-      <div class="step-content">
-        <h3>Step 3: Choose Benefit</h3>
-        <p>Choose 1 of the following benefits:</p>
-
+      <div class="benefit-panel">
+        <h4>Choose Benefit</h4>
         <div class="benefit-options">
-          <div class="benefit-option ${this.baseEgo.powerBenefit === 'dice_power' ? 'selected' : ''}"
-               data-benefit="dice_power">
-            <h4>Dice Power Bonus</h4>
-            <p><strong>${benefitDescription}</strong></p>
-            <p>Enhances the raw power of your E.G.O.'s dice based on the number of dice.</p>
-          </div>
-
-          <div class="benefit-option ${this.baseEgo.powerBenefit === 'cost_bonus' ? 'selected' : ''}"
-               data-benefit="cost_bonus">
-            <h4>Cost Enhancement</h4>
-            <p><strong>Any skill module with a {Cost} effect treats {Cost} as being 1 higher.</strong></p>
-            <p>Increases the effectiveness of cost-based effects in your E.G.O.</p>
-          </div>
+          <div class="benefit-option ${this.baseEgo.powerBenefit === 'dice_power' ? 'selected' : ''}" data-benefit="dice_power">Dice Power Bonus<br/><small>${this.getDicePowerDesc()}</small></div>
+          <div class="benefit-option ${this.baseEgo.powerBenefit === 'cost_bonus' ? 'selected' : ''}" data-benefit="cost_bonus">Cost Enhancement<br/><small>Treat {Cost} as +1</small></div>
         </div>
       </div>
     `;
   }
 
-  // Render passive selection step
   renderPassiveSelection() {
     return `
-      <div class="step-content">
-        <h3>Step 4: Pick a Passive from the Base Passives List</h3>
-        <p>Select one passive ability that will be active while your Base E.G.O. is equipped.</p>
-
+      <div class="passive-panel">
+        <h4>Select Passive</h4>
         <div class="passive-grid">
-          ${this.availablePassives.map(passive => `
-            <div class="passive-card ${this.baseEgo.passiveId === passive.id ? 'selected' : ''}"
-                 data-passive-id="${passive.id}">
-              <div class="passive-header">
-                <h4>${passive.name}</h4>
-                ${passive.requiresChoice ? '<span class="choice-badge">Requires Choice</span>' : ''}
-              </div>
-              <div class="passive-description">${passive.description}</div>
+          ${this.availablePassives.map(p => `
+            <div class="passive-card ${this.baseEgo.passiveId === p.id ? 'selected' : ''}" data-passive-id="${p.id}">
+              <h5>${p.name}</h5>
+              <div class="passive-description">${p.description}</div>
             </div>
           `).join('')}
         </div>
-
-        ${this.renderPassiveChoice()}
+        ${this.baseEgo.passiveId ? `<div class="passive-choice">${baseEgoPassiveManager.resolvePassiveDescription(this.baseEgo.passiveId, this.baseEgo.passiveChoice)}</div>` : ''}
       </div>
     `;
   }
 
-  // Render passive choice if needed
-  renderPassiveChoice() {
-    if (!this.baseEgo.passiveId) return '';
-
-    const passive = baseEgoPassiveManager.getPassiveById(this.baseEgo.passiveId);
-    if (!passive || !passive.requiresChoice) return '';
-
-    return `
-      <div class="passive-choice-section">
-        <h4>Choose ${passive.choiceType}:</h4>
-        <div class="choice-options">
-          ${passive.choices.map(choice => `
-            <button class="choice-btn ${this.baseEgo.passiveChoice === choice ? 'selected' : ''}"
-                    data-choice="${choice}">
-              ${choice}
-            </button>
-          `).join('')}
-        </div>
-      </div>
-    `;
-  }
-
-  // Render finalization step
   renderFinalization() {
     return `
-      <div class="step-content">
-        <h3>Step 5: Finalize Your Base E.G.O.</h3>
-        
-        <div class="ego-name-section">
-          <label for="ego-name">Nome do E.G.O.:</label>
-          <input type="text" id="ego-name" value="${this.baseEgo.name}"
-                 placeholder="Digite o nome do seu E.G.O.">
+      <div class="finalize-panel">
+        <h4>Finalize Base E.G.O.</h4>
+        <div class="form-group">
+          <label>Name</label>
+          <input id="ego-name" type="text" value="${this.baseEgo.name || ''}" />
         </div>
-
-        <div class="ego-preview">
-          <h4>Base E.G.O. Preview</h4>
-          ${this.renderEgoPreview()}
+        <div class="form-group">
+          <label>Description</label>
+          <textarea id="ego-desc">${this.baseEgo.description || ''}</textarea>
         </div>
-
-        <div class="finalization-requirements">
-          <h4>Requirements Summary</h4>
-          <ul>
-            <li>✓ Base Cost: ${this.baseEgo.cost} (≥ 2)</li>
-            <li>✓ Modules: ${this.baseEgo.modules.rank1.length} Rank 1, ${this.baseEgo.modules.rank2.length} Rank 2, ${this.baseEgo.modules.rank3.length} Rank 3</li>
-            <li>✓ Power Benefit: ${this.baseEgo.powerBenefit === 'dice_power' ? 'Dice Power Bonus' : 'Cost Enhancement'}</li>
-            <li>✓ Passive: ${baseEgoPassiveManager.getPassiveById(this.baseEgo.passiveId)?.name || 'None'}</li>
-            <li>✓ Emotion Point Cost: ${this.baseEgo.emotionCost}</li>
-            <li>✓ Rating: ${this.baseEgo.rating}</li>
-          </ul>
+        <div class="form-group">
+          <label>Image</label>
+          <input id="ego-image-input" type="file" accept="image/*" />
         </div>
+        <div class="ego-preview">${this.renderEgoPreview()}</div>
       </div>
     `;
   }
 
-  // Render E.G.O. preview
   renderEgoPreview() {
-    const passive = baseEgoPassiveManager.getPassiveById(this.baseEgo.passiveId);
-    const passiveDescription = passive ? 
-      baseEgoPassiveManager.resolvePassiveDescription(this.baseEgo.passiveId, this.baseEgo.passiveChoice) :
-      'No passive selected';
+    const imageHtml = this.baseEgo.image ? `<img src="${this.baseEgo.image}" alt="E.G.O. image" class="ego-image-preview"/>` : `<div class="ego-image-placeholder">No image</div>`;
 
     return `
-      <div class="ego-preview-card">
-        <div class="ego-header">
-          <h4>${this.baseEgo.name || 'Unnamed E.G.O.'}</h4>
-          <span class="ego-rating">${this.baseEgo.rating}</span>
-        </div>
-        
-        <div class="ego-stats">
-          <div>Cost: ${this.baseEgo.emotionCost} Emotion Points</div>
-          <div>Base: ${this.baseEgo.baseName} (Cost ${this.baseEgo.cost})</div>
-        </div>
+      <div class="ego-card-preview old-style">
+        <div class="ego-row">
+          <div class="ego-image-wrap">${imageHtml}</div>
+          <div class="ego-main">
+            <h2 class="ego-name">${this.baseEgo.name || 'Unnamed E.G.O.'}</h2>
+            ${this.baseEgo.description ? `<p class="ego-description">${this.baseEgo.description}</p>` : ''}
 
-        <div class="ego-dice">
-          ${this.baseEgo.dice.map(die => `
-            <div class="die-preview">${die.tag} ${die.notation}</div>
-          `).join('')}
-        </div>
+            <div class="ego-meta">
+              <div><strong>Base:</strong> ${this.baseEgo.baseName || '—'}</div>
+              <div><strong>Base Cost:</strong> ${this.baseEgo.cost || '—'}</div>
+              <div><strong>Emotion Cost:</strong> ${this.baseEgo.emotionCost} EP</div>
+            </div>
 
-        <div class="ego-benefit">
-          <strong>Benefit:</strong> ${this.baseEgo.powerBenefit === 'dice_power' ? 
-            this.getDicePowerDescription() : 
-            'Cost effects treat {Cost} as 1 higher'}
-        </div>
-
-        <div class="ego-passive">
-          <strong>E.G.O. Passive:</strong> ${passive ? passive.name : 'None'}
-          <div class="passive-description">${passiveDescription}</div>
-          <em>Remains active even when the EGO isn't usable.</em>
-        </div>
-
-        <div class="ego-modules">
-          <strong>Modules:</strong>
-          <ul>
-            ${this.baseEgo.modules.rank1.map(m => `<li>T1: ${m.name}</li>`).join('')}
-            ${this.baseEgo.modules.rank2.map(m => `<li>T2: ${m.name}</li>`).join('')}
-            ${this.baseEgo.modules.rank3.map(m => `<li>T3: ${m.name}</li>`).join('')}
-          </ul>
+            <div class="ego-modules">
+              <strong>Modules</strong>
+              <div class="modules-list">
+                ${this.baseEgo.modules.rank1.map(m => `<div class="module-line">T1: ${m.name}${m.targetDieId?` (on ${this.baseEgo.dice.find(d=>d.id===m.targetDieId)?.tag||m.targetDieId})`:''}</div>`).join('')}
+                ${this.baseEgo.modules.rank2.map(m => `<div class="module-line">T2: ${m.name}${m.targetDieId?` (on ${this.baseEgo.dice.find(d=>d.id===m.targetDieId)?.tag||m.targetDieId})`:''}</div>`).join('')}
+                ${this.baseEgo.modules.rank3.map(m => `<div class="module-line">T3: ${m.name}${m.targetDieId?` (on ${this.baseEgo.dice.find(d=>d.id===m.targetDieId)?.tag||m.targetDieId})`:''}</div>`).join('')}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     `;
   }
 
-  // Get dice power benefit description
-  getDicePowerDescription() {
-    const diceCount = this.baseEgo.dice.length;
-    if (diceCount === 1) return '+3 Power to single die';
-    if (diceCount === 2) return '+2 Power to each die';
-    if (diceCount >= 3) return '+1 Power to each die';
-    return 'No dice power bonus';
+  getDicePowerDesc() {
+    const c = this.baseEgo.dice.length;
+    if (c === 1) return '+3 Power to single die';
+    if (c === 2) return '+2 Power to each die';
+    if (c >= 3) return '+1 Power to each die';
+    return '';
   }
 
-  // Render navigation buttons
-  renderNavigationButtons() {
-    const canProceed = this.canProceedToNextStep();
-    const canGoBack = this.currentStep !== 'selectBase';
-
-    return `
-      <div class="navigation-buttons">
-        <button class="btn-secondary" id="cancel-ego-btn">Cancel</button>
-        ${canGoBack ? '<button class="btn-secondary" id="back-step-btn">Back</button>' : ''}
-        ${canProceed ? `
-          <button class="btn-primary" id="next-step-btn">
-            ${this.currentStep === 'finalize' ? 'Create E.G.O.' : 'Next'}
-          </button>
-        ` : ''}
-      </div>
-    `;
-  }
-
-  // Check if can proceed to next step
-  canProceedToNextStep() {
-    switch (this.currentStep) {
-      case 'selectBase':
-        return this.baseEgo.baseId !== '';
-      case 'addModules':
-        return this.isModulesComplete();
-      case 'chooseBenefit':
-        return this.baseEgo.powerBenefit !== '';
-      case 'selectPassive':
-        return this.isPassiveComplete();
-      case 'finalize':
-        return this.baseEgo.name.trim() !== '';
-      default:
-        return false;
-    }
-  }
-
-  // Check if modules are complete
-  isModulesComplete() {
-    return this.baseEgo.modules.rank1.length === 3 &&
-           this.baseEgo.modules.rank2.length === 1 &&
-           this.baseEgo.modules.rank3.length === 1;
-  }
-
-  // Check if passive selection is complete
-  isPassiveComplete() {
-    if (!this.baseEgo.passiveId) return false;
-    
-    const passive = baseEgoPassiveManager.getPassiveById(this.baseEgo.passiveId);
-    if (!passive) return false;
-    
-    if (passive.requiresChoice) {
-      return this.baseEgo.passiveChoice !== '';
-    }
-    
-    return true;
-  }
-
-  // Handle base selection
+  // Public handlers used by characterSheet delegation
   selectBase(baseId) {
-    const base = skillBasesManager.getBaseById(baseId);
-    if (!base || base.cost < 2) return;
-
-    this.baseEgo.baseId = baseId;
-    this.baseEgo.baseName = base.name;
-    this.baseEgo.cost = base.cost;
-    this.baseEgo.dice = base.dice.map(die => ({ ...die }));
+    if (this.applyBase(baseId)) {
+      this.currentStep = 'configureDice';
+    }
   }
 
-  // Handle module selection
-  selectModule(moduleId, rank) {
+  // optionId and targetDieId are optional. If module.target === 'die', targetDieId indicates which die it applies to.
+  selectModule(moduleId, rank, optionId = null, targetDieId = null) {
     const rankKey = `rank${rank}`;
-    const maxCount = rank === 1 ? 3 : 1;
-    
-    if (this.baseEgo.modules[rankKey].length >= maxCount) return;
-
+    const max = rank === 1 ? 3 : 1;
+    if (this.baseEgo.modules[rankKey].length >= max) return { success: false, error: 'Module slots full' };
     const module = skillModulesManager.getModuleById(moduleId, rank);
-    if (!module) return;
+    if (!module) return { success: false, error: 'Module not found' };
 
-    // Check if already selected (unless repeating)
-    const isSelected = this.baseEgo.modules[rankKey].some(m => m.id === moduleId);
-    if (isSelected && !module.repeating) return;
+    const already = this.baseEgo.modules[rankKey].some(m => m.id === moduleId && (!m.optionId || m.optionId === optionId) && m.targetDieId === targetDieId);
+    if (already && !module.repeating) return { success: false, error: 'Module already selected' };
 
-    this.baseEgo.modules[rankKey].push({
-      id: moduleId,
-      name: module.name,
-      effect: module.effect,
-      rank: rank
+    // Build a temporary SkillCreator to reuse validation logic so E.G.O. follows skill rules
+    const tempSkill = new SkillCreator(this.character);
+    // Build a skill-like object from baseEgo
+    const skillLike = {
+      id: 'temp',
+      name: this.baseEgo.baseName || 'EGO_TEMP',
+      baseId: this.baseEgo.baseId,
+      cost: this.baseEgo.cost || 0,
+      dice: (this.baseEgo.dice || []).map(d => ({ id: d.id, tag: d.tag, type: d.tag && d.tag.includes('Evade') ? 'defensive' : 'offensive', dieSize: d.dieSize, bonus: d.bonus || 0, effects: [] })),
+      modules: [],
+      effects: []
+    };
+
+    // Populate existing module effects into skillLike for validation
+    ['rank1','rank2','rank3'].forEach(rk => {
+      (this.baseEgo.modules[rk] || []).forEach(m => {
+        if (m.targetDieId) {
+          const die = skillLike.dice.find(dd => dd.id === m.targetDieId);
+          if (die) die.effects.push({ tag: m.tag || '', effect: m.effect || '' });
+        } else {
+          skillLike.effects.push({ tag: m.tag || '', effect: m.effect || '' });
+        }
+      });
     });
+
+    tempSkill.currentSkill = skillLike;
+
+    // Validate via SkillCreator rules
+    const targetParam = module.target === 'die' && targetDieId ? targetDieId : null;
+    const validation = tempSkill.validateModuleAddition(module, targetParam);
+    if (!validation.valid) return { success: false, error: validation.error };
+
+    // If validation passed, proceed to add
+    const effect = optionId && module.options ? (module.options.find(o => o.id === optionId)?.description || module.effect) : module.effect;
+    const toPush = { id: moduleId, name: module.name, effect, rank, optionId: optionId || null, tag: module.tag || null };
+    if (module.target === 'die') toPush.targetDieId = targetDieId || null;
+
+    this.baseEgo.modules[rankKey].push(toPush);
+    return { success: true };
   }
 
-  // Handle module removal
   removeModule(moduleId, rank) {
     const rankKey = `rank${rank}`;
-    this.baseEgo.modules[rankKey] = this.baseEgo.modules[rankKey]
-      .filter(m => m.id !== moduleId);
+    this.baseEgo.modules[rankKey] = this.baseEgo.modules[rankKey].filter(m => m.id !== moduleId);
   }
 
-  // Handle benefit selection
-  selectBenefit(benefit) {
-    this.baseEgo.powerBenefit = benefit;
-  }
+  selectBenefit(benefit) { this.baseEgo.powerBenefit = benefit; }
+  selectPassive(passiveId) { this.baseEgo.passiveId = passiveId; this.baseEgo.passiveChoice = ''; }
+  selectPassiveChoice(choice) { this.baseEgo.passiveChoice = choice; }
 
-  // Handle passive selection
-  selectPassive(passiveId) {
-    this.baseEgo.passiveId = passiveId;
-    this.baseEgo.passiveChoice = ''; // Reset choice when changing passive
-  }
-
-  // Handle passive choice
-  selectPassiveChoice(choice) {
-    this.baseEgo.passiveChoice = choice;
-  }
-
-  // Handle step navigation
   nextStep() {
-    const steps = ['selectBase', 'addModules', 'chooseBenefit', 'selectPassive', 'finalize'];
-    const currentIndex = steps.indexOf(this.currentStep);
-    
-    if (currentIndex < steps.length - 1) {
-      this.currentStep = steps[currentIndex + 1];
-    } else if (this.currentStep === 'finalize') {
-      this.finalizeEgo();
-    }
+    const order = ['selectBase','configureDice','addModules','chooseBenefit','selectPassive','finalize'];
+    const idx = order.indexOf(this.currentStep);
+    if (idx < order.length - 1) this.currentStep = order[idx + 1];
   }
-
-  // Handle back navigation
   previousStep() {
-    const steps = ['selectBase', 'addModules', 'chooseBenefit', 'selectPassive', 'finalize'];
-    const currentIndex = steps.indexOf(this.currentStep);
-    
-    if (currentIndex > 0) {
-      this.currentStep = steps[currentIndex - 1];
-    }
+    const order = ['selectBase','configureDice','addModules','chooseBenefit','selectPassive','finalize'];
+    const idx = order.indexOf(this.currentStep);
+    if (idx > 0) this.currentStep = order[idx - 1];
   }
 
-  // Finalize and create the E.G.O.
+  setEgoName(name) { this.baseEgo.name = name; }
+  setEgoDescription(desc) { this.baseEgo.description = desc; }
+  async setEgoImage(file) {
+    if (!file) { this.baseEgo.image = null; return; }
+    // Convert to data URL for preview/storage
+    const reader = new FileReader();
+    const p = new Promise((resolve) => {
+      reader.onload = () => { this.baseEgo.image = reader.result; resolve(true); };
+      reader.readAsDataURL(file);
+    });
+    return p;
+  }
+
+  cancel() { if (typeof this.onCancel === 'function') this.onCancel(); }
+
   finalizeEgo() {
+    // Validate required fields
+    const missing = [];
+    if (!this.baseEgo.baseId) missing.push('Base');
+    if (!this.baseEgo.name || this.baseEgo.name.trim() === '') missing.push('Name');
+    if ((this.baseEgo.modules.rank1 || []).length !== 3) missing.push('3x Rank 1 modules');
+    if ((this.baseEgo.modules.rank2 || []).length !== 1) missing.push('1x Rank 2 module');
+    if ((this.baseEgo.modules.rank3 || []).length !== 1) missing.push('1x Rank 3 module');
+
+    if (missing.length > 0) {
+      return { success: false, error: 'Missing or invalid fields: ' + missing.join(', ') };
+    }
+
     const finalEgo = {
-      id: 'base_ego',
+      id: 'base_ego_' + Date.now(),
       name: this.baseEgo.name,
       rating: this.baseEgo.rating,
       emotionCost: this.baseEgo.emotionCost,
       baseId: this.baseEgo.baseId,
       baseName: this.baseEgo.baseName,
       baseCost: this.baseEgo.cost,
-      dice: this.baseEgo.dice.map(die => ({ ...die })),
+      dice: this.baseEgo.dice.map(d => ({ ...d })),
       modules: { ...this.baseEgo.modules },
       powerBenefit: this.baseEgo.powerBenefit,
       passiveId: this.baseEgo.passiveId,
       passiveChoice: this.baseEgo.passiveChoice,
-      passive: baseEgoPassiveManager.formatPassiveForDisplay(
-        this.baseEgo.passiveId, 
-        this.baseEgo.passiveChoice
-      ),
-      createdAt: new Date().toISOString()
+      passive: baseEgoPassiveManager.formatPassiveForDisplay(this.baseEgo.passiveId, this.baseEgo.passiveChoice),
+      createdAt: new Date().toISOString(),
+      image: this.baseEgo.image || null,
+      description: this.baseEgo.description || ''
     };
-
-    this.onSave(finalEgo);
-  }
-
-  // Set E.G.O. name
-  setEgoName(name) {
-    this.baseEgo.name = name;
-  }
-
-  // Cancel creation
-  cancel() {
-    this.onCancel();
+    if (typeof this.onSave === 'function') this.onSave(finalEgo);
+    return { success: true, ego: finalEgo };
   }
 }
